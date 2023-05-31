@@ -243,7 +243,7 @@ test_data_config = dict(
 
 data = dict(
     samples_per_gpu=4,
-    workers_per_gpu=4,
+    workers_per_gpu=16,
     train=dict(
         data_root=data_root,
         ann_file=data_root + 'bevdetv2-nuscenes_infos_train.pkl',

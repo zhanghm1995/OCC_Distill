@@ -2,6 +2,9 @@
 # config="configs/bevdet_occ/bevdet-occ-stbase-4d-stereo-512x1408-24e.py"
 config="configs/bevdet_occ/bevdet-occ-r50-4d-stereo-24e.py"
 
+### Train the Occupancy based on BEVFusion version
+config="configs/bevdet_fusion_occ/bevdet-fusion-occ-r50-4d-stereo-24e.py"
+
 num_gpu=4
 
 set -x
