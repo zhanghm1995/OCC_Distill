@@ -800,6 +800,31 @@ class PointToMultiViewDepth(object):
         depth_map = torch.stack(depth_map_list)
         results['gt_depth'] = depth_map
         return results
+    
+
+@PIPELINES.register_module()
+class PointToEgo(object):
+    """Transform the points to ego coordinates.
+    """
+
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+
+    def __call__(self, results):
+        points_lidar = results['points']
+
+        ## Obtain the transformation matrix from lidar to ego
+        lidar2lidarego = np.eye(4, dtype=np.float32)
+        lidar2lidarego[:3, :3] = Quaternion(
+            results['curr']['lidar2ego_rotation']).rotation_matrix
+        lidar2lidarego[:3, 3] = results['curr']['lidar2ego_translation']
+        lidar2lidarego = torch.from_numpy(lidar2lidarego)
+
+        points_ego = points_lidar.tensor[:, :3].matmul(
+                lidar2lidarego[:3, :3].T) + lidar2lidarego[:3, 3].unsqueeze(0)
+        points_ego = torch.cat([points_ego, points_lidar.tensor[:, 3:]], dim=1)
+        results['points'] = points_lidar.new_point(points_ego)
+        return results
 
 
 def mmlabNormalize(img):

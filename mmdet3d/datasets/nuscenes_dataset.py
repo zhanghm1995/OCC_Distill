@@ -236,6 +236,7 @@ class NuScenesDataset(Custom3DDataset):
             pts_filename=info['lidar_path'],
             sweeps=info['sweeps'],
             timestamp=info['timestamp'] / 1e6,
+            curr=info
         )
         if 'ann_infos' in info:
             input_dict['ann_infos'] = info['ann_infos']
