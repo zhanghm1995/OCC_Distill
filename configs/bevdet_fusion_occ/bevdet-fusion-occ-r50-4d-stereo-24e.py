@@ -1,26 +1,5 @@
 # Copyright (c) Phigent Robotics. All rights reserved.
 
-# align_after_view_transfromation=False
-# ===> per class IoU of 6019 samples:
-# ===> others - IoU = 8.22
-# ===> barrier - IoU = 44.21
-# ===> bicycle - IoU = 10.34
-# ===> bus - IoU = 42.08
-# ===> car - IoU = 49.63
-# ===> construction_vehicle - IoU = 23.37
-# ===> motorcycle - IoU = 17.41
-# ===> pedestrian - IoU = 21.49
-# ===> traffic_cone - IoU = 19.7
-# ===> trailer - IoU = 31.33
-# ===> truck - IoU = 37.09
-# ===> driveable_surface - IoU = 80.13
-# ===> other_flat - IoU = 37.37
-# ===> sidewalk - IoU = 50.41
-# ===> terrain - IoU = 54.29
-# ===> manmade - IoU = 45.56
-# ===> vegetation - IoU = 39.59
-# ===> mIoU of 6019 samples: 36.01
-
 
 _base_ = ['../_base_/datasets/nus-3d.py', '../_base_/default_runtime.py']
 # Global
@@ -187,6 +166,7 @@ train_pipeline = [
         use_dim=[0,1,2,4],
         file_client_args=file_client_args),
     dict(type='PointToMultiViewDepth', downsample=1, grid_config=grid_config),
+    dict(type='PointToEgo'),
     dict(type='DefaultFormatBundle3D', class_names=class_names),
     dict(
         type='Collect3D', keys=['points', 'img_inputs', 'gt_depth', 'voxel_semantics',
@@ -206,6 +186,7 @@ test_pipeline = [
         load_dim=5,
         use_dim=[0,1,2,4],
         file_client_args=file_client_args),
+    dict(type='PointToEgo'),
     dict(
         type='MultiScaleFlipAug3D',
         img_scale=(1333, 800),
