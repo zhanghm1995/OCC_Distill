@@ -137,12 +137,12 @@ if __name__ == '__main__':
     version = 'v1.0'
     train_version = f'{version}-trainval'
     root_path = './data/nuscenes'
-    extra_tag = 'bevdetv2-nuscenes'
+    extra_tag = 'bevdetv3-nuscenes'
     nuscenes_data_prep(
         root_path=root_path,
         info_prefix=extra_tag,
         version=train_version,
-        max_sweeps=0)
+        max_sweeps=10)
 
     print('add_ann_infos')
     add_ann_adj_info(extra_tag)
