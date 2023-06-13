@@ -14,4 +14,4 @@ config="configs/bevdet_occ/bevdet-lidar-occ-voxel-multi-sweeps-24e.py"
 num_gpu=4
 
 set -x
-bash ./tools/dist_train.sh ${config} ${num_gpu}
+bash ./tools/dist_train.sh ${config} ${num_gpu} --work-dir bevdet-lidar-occ-voxel-multi-sweeps-linear-sch-24e

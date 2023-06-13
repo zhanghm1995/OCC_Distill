@@ -112,6 +112,22 @@ class BEVLidarOCC(CenterPoint):
         occ_res = occ_res.squeeze(dim=0).cpu().numpy().astype(np.uint8)
         return [occ_res]
     
+    def get_intermediate_features(self, points, img, img_metas, **kwargs):
+        """Obtain the features for cross-modality distillation when as a teacher
+        model.
+        """
+        voxels, num_points, coors = self.voxelize(points)
+
+        voxel_features = self.pts_voxel_encoder(voxels, num_points, coors)
+        batch_size = coors[-1, 0] + 1
+        low_feats = self.pts_middle_encoder(voxel_features, coors, batch_size)
+
+        x = self.pts_bev_encoder_backbone(low_feats)
+        high_feats = self.pts_bev_encoder_neck(x)
+
+        prob_feats = self.final_conv(high_feats).permute(0, 4, 3, 2, 1)
+        return low_feats, high_feats, prob_feats  
+    
     def extract_feat(self, points, img, img_metas, **kwargs):
         """Extract the needed features"""
         img_feats = None
