@@ -135,6 +135,34 @@ class BEVStereo4DOCC(BEVStereo4D):
         losses.update(loss_occ)
         return losses
     
+    def get_intermediate_features(self, points, img_inputs, img_metas, 
+                                  return_loss=False, **kwargs):
+        """Obtain the intermediate features in the forwarding process.
+        """
+        img_feats, pts_feats, depth = self.extract_feat(
+            points, img=img_inputs, img_metas=img_metas, **kwargs)
+        losses = dict()
+        gt_depth = kwargs['gt_depth']
+        loss_depth = self.img_view_transformer.get_depth_loss(gt_depth, depth)
+        losses['loss_depth'] = loss_depth
+
+        prob_feats = self.final_conv(img_feats[0]).permute(0, 4, 3, 2, 1) # bncdhw->bnwhdc
+        if self.use_predicter:
+            occ_pred = self.predicter(prob_feats)
+        else:
+            occ_pred = prob_feats
+
+        voxel_semantics = kwargs['voxel_semantics']
+        mask_camera = kwargs['mask_camera']
+        assert voxel_semantics.min() >= 0 and voxel_semantics.max() <= 17
+        loss_occ = self.loss_single(voxel_semantics, mask_camera, occ_pred)
+        losses.update(loss_occ)
+
+        if return_loss:
+            return (None, img_feats[0], prob_feats), losses
+        else:
+            return (None, img_feats[0], prob_feats)
+
 
 class SE_Block(nn.Module):
     def __init__(self, c):
