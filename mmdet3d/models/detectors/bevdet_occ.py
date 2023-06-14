@@ -165,13 +165,21 @@ class BEVStereo4DOCC(BEVStereo4D):
 
 
 class SE_Block(nn.Module):
-    def __init__(self, c):
+    def __init__(self, c, mode='2d'):
         super().__init__()
-        self.att = nn.Sequential(
-            nn.AdaptiveAvgPool2d(1),
-            nn.Conv2d(c, c, kernel_size=1, stride=1),
-            nn.Sigmoid()
-        )
+        if mode == '2d':
+            self.att = nn.Sequential(
+                nn.AdaptiveAvgPool2d(1),
+                nn.Conv2d(c, c, kernel_size=1, stride=1),
+                nn.Sigmoid())
+        elif mode == '3d':
+            self.att = nn.Sequential(
+                nn.AdaptiveAvgPool3d(1),
+                nn.Conv3d(c, c, kernel_size=1, stride=1),
+                nn.Sigmoid())
+        else:
+            raise ValueError(
+                'Expected mode should be 2d or 3d, but got {}.'.format(mode))
     def forward(self, x):
         return x * self.att(x)
 
@@ -182,30 +190,44 @@ class BEVFusionStereo4DOCC(BEVStereo4DOCC):
     def __init__(self,
                  se=True,
                  lic=384,
+                 fuse_3d_bev=False,
                  **kwargs):
         super(BEVFusionStereo4DOCC, self).__init__(**kwargs)
         
+        self.fuse_3d_bev = fuse_3d_bev
         self.se = se
         
-        if se:
-            self.seblock = SE_Block(32*16)
-        self.reduc_conv = ConvModule(
-            lic + 32*16,
-            32*16,
-            3,
-            padding=1,
-            conv_cfg=None,
-            norm_cfg=dict(type='BN', eps=1e-3, momentum=0.01),
-            act_cfg=dict(type='ReLU'),
-            inplace=False)
+        if fuse_3d_bev:
+            if se:
+                self.seblock = SE_Block(32, mode='3d')
+            self.reduc_conv = ConvModule(
+                lic + 32,
+                out_channels=32,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+                bias=True,
+                conv_cfg=dict(type='Conv3d'))
+        else:
+            if se:
+                self.seblock = SE_Block(32*16)
+            self.reduc_conv = ConvModule(
+                lic + 32*16,
+                32*16,
+                3,
+                padding=1,
+                conv_cfg=None,
+                norm_cfg=dict(type='BN', eps=1e-3, momentum=0.01),
+                act_cfg=dict(type='ReLU'),
+                inplace=False)
 
     def extract_pts_feat(self, pts, img_feats, img_metas):
         """Extract features of points."""
         if not self.with_pts_backbone:
             return None
         voxels, num_points, coors = self.voxelize(pts)
-        voxel_features = self.pts_voxel_encoder(voxels, num_points, coors,
-                                                )
+        voxel_features = self.pts_voxel_encoder(
+            voxels, num_points, coors)
         batch_size = coors[-1, 0] + 1
         x = self.pts_middle_encoder(voxel_features, coors, batch_size)
         x = self.pts_backbone(x)
@@ -214,18 +236,25 @@ class BEVFusionStereo4DOCC(BEVStereo4DOCC):
         return x
     
     def apply_lc_fusion(self, img_feats, pts_feats):
-        if img_feats.ndim == 5:
-            Dimz = img_feats.shape[2]
-            img_bev_feat = rearrange(img_feats, 'b c Dimz DimH DimW -> b (c Dimz) DimH DimW')
+        if self.fuse_3d_bev:
+            assert img_feats.ndim == pts_feats.ndim == 5
+
+            pts_feats = [self.reduc_conv(torch.cat([img_feats, pts_feats], dim=1))]
+            if self.se:
+                pts_feats = self.seblock(pts_feats[0])
         else:
-            img_bev_feat = img_feats
-        
-        pts_feats = [self.reduc_conv(torch.cat([img_bev_feat, pts_feats[0]], dim=1))]
-        if self.se:
-            pts_feats = self.seblock(pts_feats[0])
-        
-        if img_feats.ndim == 5:
-            pts_feats = rearrange(pts_feats, 'b (c Dimz) DimH DimW -> b c Dimz DimH DimW', Dimz=Dimz)
+            if img_feats.ndim == 5:
+                Dimz = img_feats.shape[2]
+                img_bev_feat = rearrange(img_feats, 'b c Dimz DimH DimW -> b (c Dimz) DimH DimW')
+            else:
+                img_bev_feat = img_feats
+            
+            pts_feats = [self.reduc_conv(torch.cat([img_bev_feat, pts_feats[0]], dim=1))]
+            if self.se:
+                pts_feats = self.seblock(pts_feats[0])
+            
+            if img_feats.ndim == 5:
+                pts_feats = rearrange(pts_feats, 'b (c Dimz) DimH DimW -> b c Dimz DimH DimW', Dimz=Dimz)
         return [pts_feats]
         
     def extract_feat(self, points, img, img_metas, **kwargs):
