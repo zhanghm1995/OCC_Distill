@@ -41,6 +41,7 @@ class BEVLidarDistillCameraOCC(Base3DDetector):
         if freeze_teacher_branch:
             for param in self.teacher_model.parameters():
                 param.requires_grad = False
+            self.teacher_model.eval()
         
     def forward_train(self,
                       points=None,
@@ -76,17 +77,49 @@ class BEVLidarDistillCameraOCC(Base3DDetector):
                     img=None,
                     rescale=False,
                     **kwargs):
-        """Test function without augmentaiton."""
-        _, pts_feats = self.extract_feat(
-            points, img=img, img_metas=img_metas, **kwargs)
-        occ_pred = self.final_conv(pts_feats[0]).permute(0, 4, 3, 2, 1)
-        # bncdhw->bnwhdc
-        if self.use_predicter:
-            occ_pred = self.predicter(occ_pred)
-        occ_score=occ_pred.softmax(-1)
-        occ_res=occ_score.argmax(-1)
-        occ_res = occ_res.squeeze(dim=0).cpu().numpy().astype(np.uint8)
-        return [occ_res]
+        """Test function using the student model and without augmentaiton."""
+        ## Forward the student model and get the loss
+        results = self.teacher_model.simple_test(
+            points, img_metas, img, rescale=rescale, **kwargs)
+        return results
+    
+    def forward_test(self,
+                     points=None,
+                     img_metas=None,
+                     img_inputs=None,
+                     **kwargs):
+        """
+        Args:
+            points (list[torch.Tensor]): the outer list indicates test-time
+                augmentations and inner torch.Tensor should have a shape NxC,
+                which contains all points in the batch.
+            img_metas (list[list[dict]]): the outer list indicates test-time
+                augs (multiscale, flip, etc.) and the inner list indicates
+                images in a batch
+            img (list[torch.Tensor], optional): the outer
+                list indicates test-time augmentations and inner
+                torch.Tensor should have a shape NxCxHxW, which contains
+                all images in the batch. Defaults to None.
+        """
+        for var, name in [(img_inputs, 'img_inputs'),
+                          (img_metas, 'img_metas')]:
+            if not isinstance(var, list):
+                raise TypeError('{} must be a list, but got {}'.format(
+                    name, type(var)))
+
+        num_augs = len(img_inputs)
+        if num_augs != len(img_metas):
+            raise ValueError(
+                'num of augmentations ({}) != num of image meta ({})'.format(
+                    len(img_inputs), len(img_metas)))
+
+        if not isinstance(img_inputs[0][0], list):
+            img_inputs = [img_inputs] if img_inputs is None else img_inputs
+            points = [points] if points is None else points
+            return self.simple_test(points[0], img_metas[0], img_inputs[0],
+                                    **kwargs)
+        else:
+            return self.aug_test(None, img_metas[0], img_inputs[0], **kwargs)
     
     def extract_feat(self, points, img, img_metas, **kwargs):
         """Extract features from images."""
