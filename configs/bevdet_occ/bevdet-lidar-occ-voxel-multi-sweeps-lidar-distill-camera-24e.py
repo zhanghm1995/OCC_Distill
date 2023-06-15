@@ -9,6 +9,8 @@ distill the camera branch student model.
 '''
 
 _base_ = ['../_base_/datasets/nus-3d.py', '../_base_/default_runtime.py']
+checkpoint_config = dict(interval=2)
+
 # Global
 # For nuScenes we usually do 10-class detection
 class_names = [

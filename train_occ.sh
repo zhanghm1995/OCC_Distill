@@ -16,4 +16,4 @@ config="configs/bevdet_occ/bevdet-lidar-occ-voxel-multi-sweeps-lidar-distill-cam
 num_gpu=4
 
 set -x
-bash ./tools/dist_train.sh ${config} ${num_gpu}
+bash ./tools/dist_train.sh ${config} ${num_gpu} --work-dir bevdet-lidar-occ-voxel-multi-sweeps-lidar-distill-camera-24e-fix-BN
