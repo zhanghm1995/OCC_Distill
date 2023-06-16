@@ -23,6 +23,7 @@ class BEVLidarOCC(CenterPoint):
                  pts_bev_encoder_backbone,
                  pts_bev_encoder_neck,
                  loss_occ=None,
+                 lidar_out_dim=32,
                  out_dim=32,
                  use_mask=True,
                  num_classes=18,
@@ -36,7 +37,7 @@ class BEVLidarOCC(CenterPoint):
 
         self.out_dim = out_dim
         out_channels = out_dim if use_predicter else num_classes
-        self.final_conv = ConvModule(out_dim,
+        self.final_conv = ConvModule(lidar_out_dim,
                                      out_channels,
                                      kernel_size=3,
                                      stride=1,
@@ -84,9 +85,7 @@ class BEVLidarOCC(CenterPoint):
             points, img=img_inputs, img_metas=img_metas, **kwargs)
         
         losses = dict()
-        occ_pred = self.final_conv(pts_feats[0]).permute(0, 4, 3, 2, 1) # bncdhw->bnwhdc
-        if self.use_predicter:
-            occ_pred = self.predicter(occ_pred)
+        occ_pred = self.occ_head(pts_feats)
         voxel_semantics = kwargs['voxel_semantics']
         mask_camera = kwargs['mask_camera']
         assert voxel_semantics.min() >= 0 and voxel_semantics.max() <= 17
@@ -132,7 +131,9 @@ class BEVLidarOCC(CenterPoint):
         """Extract the needed features"""
         img_feats = None
         pts_feats = self.extract_pts_feat(points, img_feats, img_metas)
-        return img_feats, [pts_feats]
+        if not isinstance(pts_feats, list):
+            pts_feats = [pts_feats]
+        return img_feats, pts_feats
     
     def extract_pts_feat(self, pts, img_feats, img_metas):
         """Extract features of points."""
@@ -147,3 +148,15 @@ class BEVLidarOCC(CenterPoint):
         x = self.pts_bev_encoder_neck(x)
         return x
     
+    def occ_head(self, x):
+        if isinstance(x, list):
+            feats = x[0]
+        
+        if feats.dim() == 4:
+            feats = rearrange(
+                feats, 'b (c Dimz) DimH DimW -> b c Dimz DimH DimW', Dimz=16)
+        
+        occ_pred = self.final_conv(feats).permute(0, 4, 3, 2, 1) # bncdhw->bnwhdc
+        if self.use_predicter:
+            occ_pred = self.predicter(occ_pred)
+        return occ_pred
