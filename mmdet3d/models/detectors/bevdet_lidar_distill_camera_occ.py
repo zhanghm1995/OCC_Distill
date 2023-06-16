@@ -7,8 +7,11 @@ Email: haimingzhang@link.cuhk.edu.cn
 Description: Using the lidar as teacher model to distill the
 camera student model.
 '''
+import torch
 import torch.nn.functional as F
 from mmcv.runner import _load_checkpoint
+from mmdet.models.losses import L1Loss
+from einops import repeat
 
 from .. import builder
 from ..builder import DETECTORS
@@ -25,9 +28,12 @@ class BEVLidarDistillCameraOCC(Base3DDetector):
                  teacher_model_checkpoint=None,
                  freeze_teacher_branch=True,
                  init_cfg=None,
+                 use_distill_mask=False,
                  **kwargs):
         
         super(BEVLidarDistillCameraOCC, self).__init__(init_cfg=init_cfg)
+
+        self.use_distill_mask = use_distill_mask
 
         self.teacher_model = builder.build_detector(teacher_model)
         self.student_model = builder.build_detector(student_model)
@@ -42,6 +48,8 @@ class BEVLidarDistillCameraOCC(Base3DDetector):
             for param in self.teacher_model.parameters():
                 param.requires_grad = False
             self.teacher_model.eval()
+
+        self.loss_distill = L1Loss(loss_weight=1.0)
         
     def forward_train(self,
                       points=None,
@@ -58,13 +66,9 @@ class BEVLidarDistillCameraOCC(Base3DDetector):
         ## Compute the distillation losses
         assert len(teacher_feats_list) == len(student_feats_list)
 
-        # low_feat_loss = F.l1_loss(teacher_feats_list[0], student_feats_list[0])
-        high_feat_loss = F.l1_loss(teacher_feats_list[1], student_feats_list[1])
-        prob_feat_loss = F.l1_loss(teacher_feats_list[2], student_feats_list[2])
-        
-        distill_loss_dict = dict(
-            high_feat_loss=high_feat_loss,
-            prob_feat_loss=prob_feat_loss)
+        distill_loss_dict = self.compute_distill_loss(
+            teacher_feats_list, student_feats_list,
+            self.use_distill_mask, mask=kwargs['mask_camera'])
         
         losses = dict()
         losses.update(distill_loss_dict)
@@ -127,3 +131,36 @@ class BEVLidarDistillCameraOCC(Base3DDetector):
 
     def aug_test(self, points, img_metas, imgs=None, rescale=False):
         pass
+
+    def compute_distill_loss(self, 
+                             teacher_feats_list, 
+                             student_feats_list,
+                             use_distill_mask=False,
+                             mask=None):
+        losses = dict()
+
+        if use_distill_mask:
+            assert mask is not None
+            mask1 = repeat(mask, 'b h w d -> b c d h w', c=student_feats_list[1].shape[1])
+            mask1 = mask1.to(torch.float32)
+            num_total_samples1 = mask1.sum()
+            high_feat_loss = self.loss_distill(
+                teacher_feats_list[1], student_feats_list[1], 
+                mask1, avg_factor=num_total_samples1)
+
+            mask2 = repeat(mask, 'b h w d -> b h w d c', c=student_feats_list[2].shape[4])
+            mask2 = mask2.to(torch.float32)
+            num_total_samples2 = mask2.sum()
+            prob_feat_loss = self.loss_distill(
+                teacher_feats_list[2], student_feats_list[2],
+                mask2, avg_factor=num_total_samples2)
+        else:
+            high_feat_loss = F.l1_loss(teacher_feats_list[1], 
+                                       student_feats_list[1])
+            prob_feat_loss = F.l1_loss(teacher_feats_list[2], 
+                                       student_feats_list[2])
+        
+        losses['high_feat_loss'] = high_feat_loss
+        losses['prob_feat_loss'] = prob_feat_loss
+        return losses
+        
