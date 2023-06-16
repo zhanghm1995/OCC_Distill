@@ -102,7 +102,7 @@ class BEVLidarOCC(CenterPoint):
         """Test function without augmentaiton."""
         _, pts_feats = self.extract_feat(
             points, img=img, img_metas=img_metas, **kwargs)
-        occ_pred = self.final_conv(pts_feats[0]).permute(0, 4, 3, 2, 1)
+        occ_pred = self.occ_head(pts_feats)
         # bncdhw->bnwhdc
         if self.use_predicter:
             occ_pred = self.predicter(occ_pred)
