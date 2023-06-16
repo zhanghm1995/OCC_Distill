@@ -103,9 +103,6 @@ class BEVLidarOCC(CenterPoint):
         _, pts_feats = self.extract_feat(
             points, img=img, img_metas=img_metas, **kwargs)
         occ_pred = self.occ_head(pts_feats)
-        # bncdhw->bnwhdc
-        if self.use_predicter:
-            occ_pred = self.predicter(occ_pred)
         occ_score=occ_pred.softmax(-1)
         occ_res=occ_score.argmax(-1)
         occ_res = occ_res.squeeze(dim=0).cpu().numpy().astype(np.uint8)
