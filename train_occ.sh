@@ -13,7 +13,9 @@ config="configs/bevdet_occ/bevdet-lidar-occ-voxel-multi-sweeps-24e.py"
 
 config="configs/bevdet_occ/bevdet-lidar-occ-voxel-multi-sweeps-lidar-distill-camera-24e.py"
 
+config="configs/bevdet_occ/bevdet-occ-voxel-multi-sweeps-lidar-distill-camera-use-mask-24e.py"
+
 num_gpu=4
 
 set -x
-bash ./tools/dist_train.sh ${config} ${num_gpu} --work-dir bevdet-lidar-occ-voxel-multi-sweeps-lidar-distill-camera-24e-fix-BN
+CUDA_VISIBLE_DEVICES=1,5,6,7 bash ./tools/dist_train.sh ${config} ${num_gpu}

@@ -108,7 +108,12 @@ class BEVLidarOCC(CenterPoint):
         occ_res = occ_res.squeeze(dim=0).cpu().numpy().astype(np.uint8)
         return [occ_res]
     
-    def get_intermediate_features(self, points, img, img_metas, **kwargs):
+    def get_intermediate_features(self, 
+                                  points, 
+                                  img, 
+                                  img_metas, 
+                                  return_loss=False,
+                                  **kwargs):
         """Obtain the features for cross-modality distillation when as a teacher
         model.
         """
@@ -122,7 +127,23 @@ class BEVLidarOCC(CenterPoint):
         high_feats = self.pts_bev_encoder_neck(x)
 
         prob_feats = self.final_conv(high_feats).permute(0, 4, 3, 2, 1)
-        return low_feats, high_feats, prob_feats  
+
+        if return_loss:
+            if self.use_predicter:
+                occ_pred = self.predicter(prob_feats)
+            else:
+                occ_pred = prob_feats
+
+            losses = dict()
+            voxel_semantics = kwargs['voxel_semantics']
+            mask_camera = kwargs['mask_camera']
+            assert voxel_semantics.min() >= 0 and voxel_semantics.max() <= 17
+            loss_occ = self.loss_single(voxel_semantics, mask_camera, occ_pred)
+            losses['teacher_loss_occ'] = loss_occ['loss_occ']
+
+            return (None, high_feats, prob_feats), losses
+        else:
+            return (low_feats, high_feats, prob_feats)
     
     def extract_feat(self, points, img, img_metas, **kwargs):
         """Extract the needed features"""

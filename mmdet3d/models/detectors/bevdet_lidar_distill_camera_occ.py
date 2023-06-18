@@ -34,6 +34,7 @@ class BEVLidarDistillCameraOCC(Base3DDetector):
         super(BEVLidarDistillCameraOCC, self).__init__(init_cfg=init_cfg)
 
         self.use_distill_mask = use_distill_mask
+        self.freeze_teacher_branch = freeze_teacher_branch
 
         self.teacher_model = builder.build_detector(teacher_model)
         self.student_model = builder.build_detector(student_model)
@@ -56,12 +57,24 @@ class BEVLidarDistillCameraOCC(Base3DDetector):
                       img_metas=None,
                       img_inputs=None,
                       **kwargs):
-        teacher_feats_list = self.teacher_model.get_intermediate_features(
-            points, img_inputs, img_metas, **kwargs)
+        losses = dict()
+
+        if self.freeze_teacher_branch:
+            teacher_feats_list = self.teacher_model.get_intermediate_features(
+                points, img_inputs, img_metas, **kwargs)
+        else:
+            teacher_feats_list, loss_teacher_occ = \
+                self.teacher_model.get_intermediate_features(points, 
+                                                             img_inputs, 
+                                                             img_metas, 
+                                                             return_loss=True, 
+                                                             **kwargs)
+            losses.update(loss_teacher_occ)
         
         ## Forward the student model and get the loss
-        student_feats_list, loss_occ = self.student_model.get_intermediate_features(
-            points, img_inputs, img_metas, return_loss=True, **kwargs)
+        student_feats_list, loss_student_occ = \
+            self.student_model.get_intermediate_features(
+                points, img_inputs, img_metas, return_loss=True, **kwargs)
         
         ## Compute the distillation losses
         assert len(teacher_feats_list) == len(student_feats_list)
@@ -70,9 +83,8 @@ class BEVLidarDistillCameraOCC(Base3DDetector):
             teacher_feats_list, student_feats_list,
             self.use_distill_mask, mask=kwargs['mask_camera'])
         
-        losses = dict()
         losses.update(distill_loss_dict)
-        losses.update(loss_occ)
+        losses.update(loss_student_occ)
         return losses
 
     def simple_test(self,
