@@ -12,4 +12,5 @@ _base_ = ['./bevdet-lidar-occ-voxel-multi-sweeps-lidar-distill-camera-24e.py']
 model = dict(
     use_distill_mask=True,
     freeze_teacher_branch=False,
+    teacher_model_checkpoint=None
 )
