@@ -18,6 +18,8 @@ config="configs/bevdet_occ/bevdet-occ-voxel-multi-sweeps-lidar-distill-camera-us
 
 config="configs/bevdet_occ/bevdet-lidar-occ-voxel-multi-sweeps-lidar-distill-camera-24e.py"
 
+config="configs/bevdet_occ/occ-distill-ms-l2c-use-mask-both-pretrained-24e.py"
+
 num_gpu=4
 
 set -x
