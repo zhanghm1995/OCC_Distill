@@ -39,16 +39,13 @@ class BEVLidarDistillCameraOCC(Base3DDetector):
         self.teacher_model = builder.build_detector(teacher_model)
         self.student_model = builder.build_detector(student_model)
         
-        if teacher_model_checkpoint is not None:
-            logger = get_root_logger()
-            ckpt = _load_checkpoint(
-                teacher_model_checkpoint, logger=logger, map_location='cpu')
-            self.teacher_model.load_state_dict(ckpt['state_dict'], True)
-        
         if freeze_teacher_branch:
             for param in self.teacher_model.parameters():
                 param.requires_grad = False
             self.teacher_model.eval()
+            # NOTE: we must set this flag to True, 
+            # otherwise the teacher model will be re-initialized.
+            # self.teacher_model._is_init = True
 
         self.loss_distill = L1Loss(loss_weight=1.0)
         
@@ -60,8 +57,10 @@ class BEVLidarDistillCameraOCC(Base3DDetector):
         losses = dict()
 
         if self.freeze_teacher_branch:
-            teacher_feats_list = self.teacher_model.get_intermediate_features(
-                points, img_inputs, img_metas, **kwargs)
+            with torch.no_grad():
+                self.teacher_model.eval()
+                teacher_feats_list = self.teacher_model.get_intermediate_features(
+                    points, img_inputs, img_metas, **kwargs)
         else:
             teacher_feats_list, loss_teacher_occ = \
                 self.teacher_model.get_intermediate_features(points, 
