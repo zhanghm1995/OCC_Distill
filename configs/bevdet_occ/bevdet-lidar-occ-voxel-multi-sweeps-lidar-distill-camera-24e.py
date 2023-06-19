@@ -304,5 +304,4 @@ custom_hooks = [
     ),
 ]
 
-# load_from="bevdet-r50-4d-stereo-cbgs.pth"
-# fp16 = dict(loss_scale='dynamic')
+load_from="bevdet-lidar-occ-voxel-multi-sweeps-24e_teacher_model.pth"

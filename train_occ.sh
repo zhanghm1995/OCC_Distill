@@ -13,11 +13,12 @@ config="configs/bevdet_occ/bevdet-lidar-occ-voxel-multi-sweeps-24e.py"
 
 config="configs/bevdet_occ/bevdet-lidar-occ-voxel-multi-sweeps-lidar-distill-camera-24e.py"
 
+#### Distillation Experiments ########
 config="configs/bevdet_occ/bevdet-occ-voxel-multi-sweeps-lidar-distill-camera-use-mask-24e.py"
 
-config="work_dirs/bevdet-occ-voxel-multi-sweeps-lidar-distill-camera-use-mask-24e/bevdet-occ-voxel-multi-sweeps-lidar-distill-camera-use-mask-24e.py"
+config="configs/bevdet_occ/bevdet-lidar-occ-voxel-multi-sweeps-lidar-distill-camera-24e.py"
 
 num_gpu=4
 
 set -x
-CUDA_VISIBLE_DEVICES=1,2,6,7 bash ./tools/dist_train.sh ${config} ${num_gpu}
+bash ./tools/dist_train.sh ${config} ${num_gpu}
