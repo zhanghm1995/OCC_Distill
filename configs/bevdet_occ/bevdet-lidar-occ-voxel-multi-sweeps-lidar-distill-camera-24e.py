@@ -152,7 +152,6 @@ model = dict(
     type='BEVLidarDistillCameraOCC',
     teacher_model=teacher_model,
     student_model=student_model,
-    teacher_model_checkpoint="work_dirs/bevdet-lidar-occ-voxel-multi-sweeps-24e/epoch_24_ema.pth",
     freeze_teacher_branch=True
 )
 
