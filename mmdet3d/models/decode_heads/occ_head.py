@@ -125,7 +125,10 @@ class OccDistillHead(BaseModule):
                  loss_prob_feat=dict(
                     type='L1Loss', 
                     loss_weight=1.0),
+                 init_cfg=None,
                  **kwargs):
+        
+        super(OccDistillHead, self).__init__(init_cfg=init_cfg)
         
         self.loss_high_feat = build_loss(loss_high_feat)
         self.loss_prob_feat = build_loss(loss_prob_feat)
@@ -156,10 +159,10 @@ class OccDistillHead(BaseModule):
                 teacher_feats_list[2], student_feats_list[2],
                 mask2, avg_factor=num_total_samples2)
         else:
-            high_feat_loss = F.l1_loss(teacher_feats_list[1], 
-                                       student_feats_list[1])
-            prob_feat_loss = F.l1_loss(teacher_feats_list[2], 
-                                       student_feats_list[2])
+            high_feat_loss = self.loss_high_feat(teacher_feats_list[1], 
+                                                 student_feats_list[1])
+            prob_feat_loss = self.loss_prob_feat(teacher_feats_list[2], 
+                                                 student_feats_list[2])
         
         losses['high_feat_loss'] = high_feat_loss
         losses['prob_feat_loss'] = prob_feat_loss

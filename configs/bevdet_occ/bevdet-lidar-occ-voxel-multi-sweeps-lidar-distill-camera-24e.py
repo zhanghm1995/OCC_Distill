@@ -152,7 +152,16 @@ model = dict(
     type='BEVLidarDistillCameraOCC',
     teacher_model=teacher_model,
     student_model=student_model,
-    freeze_teacher_branch=True
+    freeze_teacher_branch=True,
+    
+    occ_distill_head=dict(
+        type='OccDistillHead',
+        loss_high_feat=dict(
+            type='L1Loss',
+            loss_weight=1.0),
+        loss_prob_feat=dict(
+            type='L1Loss', 
+            loss_weight=1.0)),
 )
 
 # Data

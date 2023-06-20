@@ -50,7 +50,12 @@ class BEVLidarDistillCameraOCC(Base3DDetector):
 
         self.loss_distill = L1Loss(loss_weight=1.0)
 
-        self.occ_distill_head = builder.build_head(occ_distill_head)
+        ## Define the distillation head
+        if occ_distill_head:
+            self.occ_distill_head = builder.build_head(occ_distill_head)
+        else:
+            occ_distill_head = dict(type='OccDistillHead')
+            self.occ_distill_head = builder.build_head(occ_distill_head)
         
     def forward_train(self,
                       points=None,
@@ -84,7 +89,7 @@ class BEVLidarDistillCameraOCC(Base3DDetector):
         # distill_loss_dict = self.compute_distill_loss(
         #     teacher_feats_list, student_feats_list,
         #     self.use_distill_mask, mask=kwargs['mask_camera'])
-        distill_loss_dict = self.occ_distill_head(
+        distill_loss_dict = self.occ_distill_head.loss(
             teacher_feats_list, student_feats_list,
             self.use_distill_mask, mask=kwargs['mask_camera'])
         
