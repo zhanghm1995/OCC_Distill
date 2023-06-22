@@ -57,6 +57,8 @@ class BEVLidarOCC(CenterPoint):
         self.loss_occ = build_loss(loss_occ)
 
     def loss_single(self, voxel_semantics, mask_camera, preds):
+        assert voxel_semantics.min() >= 0 and voxel_semantics.max() <= 17
+
         loss_ = dict()
         voxel_semantics=voxel_semantics.long()
         if self.use_mask:
@@ -113,7 +115,8 @@ class BEVLidarOCC(CenterPoint):
                                   img, 
                                   img_metas, 
                                   return_loss=False,
-                                  **kwargs):
+                                  logits_as_prob_feat=False,
+                                  **kwargs):       
         """Obtain the features for cross-modality distillation when as a teacher
         model.
         """
@@ -127,17 +130,19 @@ class BEVLidarOCC(CenterPoint):
         high_feats = self.pts_bev_encoder_neck(x)
 
         prob_feats = self.final_conv(high_feats).permute(0, 4, 3, 2, 1)
+        if self.use_predicter:
+            occ_pred = self.predicter(prob_feats)
+        else:
+            occ_pred = prob_feats
+
+        if logits_as_prob_feat:
+            prob_feats = occ_pred
 
         if return_loss:
-            if self.use_predicter:
-                occ_pred = self.predicter(prob_feats)
-            else:
-                occ_pred = prob_feats
-
             losses = dict()
             voxel_semantics = kwargs['voxel_semantics']
             mask_camera = kwargs['mask_camera']
-            assert voxel_semantics.min() >= 0 and voxel_semantics.max() <= 17
+            
             loss_occ = self.loss_single(voxel_semantics, mask_camera, occ_pred)
             losses['teacher_loss_occ'] = loss_occ['loss_occ']
 

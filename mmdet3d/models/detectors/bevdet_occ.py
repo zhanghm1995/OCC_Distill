@@ -136,7 +136,9 @@ class BEVStereo4DOCC(BEVStereo4D):
         return losses
     
     def get_intermediate_features(self, points, img_inputs, img_metas, 
-                                  return_loss=False, **kwargs):
+                                  return_loss=False, 
+                                  logits_as_prob_feat=False,
+                                  **kwargs):
         """Obtain the intermediate features in the forwarding process.
         """
         img_feats, pts_feats, depth = self.extract_feat(
@@ -152,6 +154,9 @@ class BEVStereo4DOCC(BEVStereo4D):
         else:
             occ_pred = prob_feats
 
+        if logits_as_prob_feat:
+            prob_feats = occ_pred
+            
         voxel_semantics = kwargs['voxel_semantics']
         mask_camera = kwargs['mask_camera']
         assert voxel_semantics.min() >= 0 and voxel_semantics.max() <= 17

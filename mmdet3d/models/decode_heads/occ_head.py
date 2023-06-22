@@ -119,6 +119,7 @@ class OccHead(Base3DDecodeHead):
 class OccDistillHead(BaseModule):
 
     def __init__(self,
+                 use_kl_loss=False,
                  loss_high_feat=dict(
                     type='L1Loss',
                     loss_weight=1.0),
@@ -129,6 +130,7 @@ class OccDistillHead(BaseModule):
                  **kwargs):
         
         super(OccDistillHead, self).__init__(init_cfg=init_cfg)
+        self.use_kl_loss = use_kl_loss
         
         self.loss_high_feat = build_loss(loss_high_feat)
         self.loss_prob_feat = build_loss(loss_prob_feat)
@@ -148,21 +150,35 @@ class OccDistillHead(BaseModule):
             mask1 = mask1.to(torch.float32)
             num_total_samples1 = mask1.sum()
             high_feat_loss = self.loss_high_feat(
-                teacher_feats_list[1], student_feats_list[1], 
+                student_feats_list[1], teacher_feats_list[1], 
                 mask1, avg_factor=num_total_samples1)
 
-            mask2 = repeat(mask, 'b h w d -> b h w d c', 
-                           c=student_feats_list[2].shape[4])
-            mask2 = mask2.to(torch.float32)
-            num_total_samples2 = mask2.sum()
-            prob_feat_loss = self.loss_prob_feat(
-                teacher_feats_list[2], student_feats_list[2],
-                mask2, avg_factor=num_total_samples2)
+            if self.use_kl_loss:
+                mask2 = mask.reshape(-1)
+                num_total_samples2 = mask2.sum()
+
+                num_classes = student_feats_list[2].shape[4]
+
+                pred = student_feats_list[2].reshape(-1, num_classes)
+                target = teacher_feats_list[2].reshape(-1, num_classes)
+
+                prob_feat_loss = self.loss_prob_feat(
+                    pred, target,
+                    mask2, avg_factor=num_total_samples2)
+            else:
+                mask2 = repeat(mask, 'b h w d -> b h w d c', 
+                            c=student_feats_list[2].shape[4])
+                mask2 = mask2.to(torch.float32)
+                num_total_samples2 = mask2.sum()
+                prob_feat_loss = self.loss_prob_feat(
+                    student_feats_list[2], teacher_feats_list[2],
+                    mask2, avg_factor=num_total_samples2)
+            
         else:
-            high_feat_loss = self.loss_high_feat(teacher_feats_list[1], 
-                                                 student_feats_list[1])
-            prob_feat_loss = self.loss_prob_feat(teacher_feats_list[2], 
-                                                 student_feats_list[2])
+            high_feat_loss = self.loss_high_feat(student_feats_list[1],
+                                                 teacher_feats_list[1])
+            prob_feat_loss = self.loss_prob_feat(student_feats_list[2],
+                                                 teacher_feats_list[2])
         
         losses['high_feat_loss'] = high_feat_loss
         losses['prob_feat_loss'] = prob_feat_loss

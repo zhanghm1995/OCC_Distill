@@ -25,7 +25,7 @@ class BEVLidarDistillCameraOCC(Base3DDetector):
     def __init__(self,
                  teacher_model=None,
                  student_model=None,
-                 teacher_model_checkpoint=None,
+                 logits_as_prob_feat=False,
                  freeze_teacher_branch=True,
                  init_cfg=None,
                  use_distill_mask=False,
@@ -34,6 +34,7 @@ class BEVLidarDistillCameraOCC(Base3DDetector):
         
         super(BEVLidarDistillCameraOCC, self).__init__(init_cfg=init_cfg)
 
+        self.logits_as_prob_feat = logits_as_prob_feat
         self.use_distill_mask = use_distill_mask
         self.freeze_teacher_branch = freeze_teacher_branch
 
@@ -68,27 +69,30 @@ class BEVLidarDistillCameraOCC(Base3DDetector):
             with torch.no_grad():
                 self.teacher_model.eval()
                 teacher_feats_list = self.teacher_model.get_intermediate_features(
-                    points, img_inputs, img_metas, **kwargs)
+                    points, img_inputs, img_metas, 
+                    logits_as_prob_feat=self.logits_as_prob_feat,
+                    **kwargs)
         else:
             teacher_feats_list, loss_teacher_occ = \
-                self.teacher_model.get_intermediate_features(points, 
-                                                             img_inputs, 
-                                                             img_metas, 
-                                                             return_loss=True, 
-                                                             **kwargs)
+                self.teacher_model.get_intermediate_features(
+                    points, 
+                    img_inputs, 
+                    img_metas, 
+                    return_loss=True,
+                    logits_as_prob_feat=self.logits_as_prob_feat, 
+                    **kwargs)
             losses.update(loss_teacher_occ)
         
         ## Forward the student model and get the loss
         student_feats_list, loss_student_occ = \
             self.student_model.get_intermediate_features(
-                points, img_inputs, img_metas, return_loss=True, **kwargs)
+                points, img_inputs, img_metas, 
+                return_loss=True, 
+                logits_as_prob_feat=self.logits_as_prob_feat,
+                **kwargs)
         
         ## Compute the distillation losses
         assert len(teacher_feats_list) == len(student_feats_list)
-
-        # distill_loss_dict = self.compute_distill_loss(
-        #     teacher_feats_list, student_feats_list,
-        #     self.use_distill_mask, mask=kwargs['mask_camera'])
         distill_loss_dict = self.occ_distill_head.loss(
             teacher_feats_list, student_feats_list,
             self.use_distill_mask, mask=kwargs['mask_camera'])
