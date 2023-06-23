@@ -27,6 +27,15 @@ def modify_state_dict(state_dict1, state_dict2):
 
 
 def append_prefix(state_dict, prefix="teacher_model."):
+    """Append the prefix in the front of the keys of the state_dict
+
+    Args:
+        state_dict (OrderedDict): the state dictionary
+        prefix (str, optional): _description_. Defaults to "teacher_model.".
+
+    Returns:
+        OrderedDcit: the new state dictionary
+    """
     if not prefix.endswith('.'):
         prefix += '.'  # append '.' to the end of prefix if not exist
     
@@ -43,6 +52,34 @@ def merge_state_dict(state_dict_list: list):
         for k, v in state_dict.items():
             new_state_dict[k] = v
     return new_state_dict
+
+
+def update_state_dict_keys(state_dict,
+                           keys_mapping=None):
+    
+    if keys_mapping is None:
+        return state_dict
+    
+    assert isinstance(keys_mapping, dict)
+
+    new_state_dict = OrderedDict()
+    for k, v in state_dict.items():
+        flag = False
+        for kk, vv in keys_mapping.items():
+            if k.startswith(kk):
+                new_key = k.replace(kk, vv)
+                flag = True
+            elif k == kk:
+                new_key = vv
+                flag = True
+            if flag:
+                break
+        
+        if flag:
+            new_state_dict[new_key] = v
+        else:
+            new_state_dict[k] = v
+    return new_state_dict 
 
 
 def main_merge_student_teacher_models():
@@ -79,6 +116,15 @@ def main_append_student_model():
 
 
 if __name__ == "__main__":
+    student_pretrained_filename = "work_dirs/bevdet-occ-r50-4d-stereo-24e/epoch_24_ema.pth"
+    student_pretrained_checkpoint = torch.load(student_pretrained_filename, map_location="cpu")
+
+    new_state_dict = update_state_dict_keys(
+        student_pretrained_checkpoint['state_dict'],
+        keys_mapping=dict(final_conv='final_conv_camera',
+                          predicter='predicter_camera'))
+
+    exit(0)
     main_append_student_model()
     exit(0)
 

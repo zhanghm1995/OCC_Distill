@@ -2,7 +2,7 @@
 from .base import Base3DDetector
 from .bevdet import BEVDepth4D, BEVDet, BEVDet4D, BEVDetTRT, BEVStereo4D
 from .bevdet_occ import BEVStereo4DOCC, BEVFusionStereo4DOCC
-from .bevdet_lidar_occ import BEVLidarOCC
+from .bevdet_lidar_occ import BEVLidarOCC, LidarOCC
 from .bevdet_lidar_distill_camera_occ import BEVLidarDistillCameraOCC
 from .centerpoint import CenterPoint
 from .dynamic_voxelnet import DynamicVoxelNet
@@ -30,5 +30,5 @@ __all__ = [
     'FCOSMono3D', 'ImVoxelNet', 'GroupFree3DNet', 'PointRCNN', 'SMOKEMono3D',
     'MinkSingleStage3DDetector', 'SASSD', 'BEVDet', 'BEVDet4D', 'BEVDepth4D',
     'BEVDetTRT', 'BEVStereo4D', 'BEVStereo4DOCC', 'BEVFusionStereo4DOCC',
-    'BEVLidarOCC', 'BEVLidarDistillCameraOCC'
+    'BEVLidarOCC', 'LidarOCC', 'BEVLidarDistillCameraOCC'
 ]

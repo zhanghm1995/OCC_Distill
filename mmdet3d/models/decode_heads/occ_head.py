@@ -14,11 +14,11 @@ from mmcv.runner import BaseModule
 from mmcv.cnn.bricks.conv_module import ConvModule
 from mmdet.models.builder import build_loss
 from ..builder import HEADS
-from .decode_head import Base3DDecodeHead
+from mmcv.runner import BaseModule
 
 
 @HEADS.register_module()
-class OccHead(Base3DDecodeHead):
+class OccSimpleHead(BaseModule):
 
     def __init__(self,
                  num_classes,
@@ -31,6 +31,8 @@ class OccHead(Base3DDecodeHead):
                     use_sigmoid=False,
                     loss_weight=1.0),
                  **kwargs):
+        
+        super(OccSimpleHead, self).__init__(**kwargs)
         
         _default_mask_keys = ('mask_camera', 'mask_lidar')
         
@@ -51,13 +53,15 @@ class OccHead(Base3DDecodeHead):
             conv_cfg=dict(type='Conv3d'))
         
         self.predicter = nn.Sequential(
-                nn.Linear(out_channels, out_channels*2),
-                nn.Softplus(),
-                nn.Linear(out_channels*2, num_classes))
+            nn.Linear(out_channels, out_channels*2),
+            nn.Softplus(),
+            nn.Linear(out_channels*2, num_classes))
         
         self.loss_occ = build_loss(loss_occ)
 
     def loss_single(self, voxel_semantics, mask, preds):
+        assert voxel_semantics.min() >= 0 and voxel_semantics.max() <= 17
+
         loss_ = dict()
         voxel_semantics = voxel_semantics.long()
         if self.use_mask:
@@ -90,7 +94,8 @@ class OccHead(Base3DDecodeHead):
         occ_pred = self.predicter(occ_pred)
         return occ_pred
     
-    def forward_train(self, inputs, img_metas, voxel_semantics, train_cfg, 
+    def forward_train(self, 
+                      inputs, 
                       **kwargs):
         """Forward function for training.
 
@@ -103,11 +108,10 @@ class OccHead(Base3DDecodeHead):
         Returns:
             dict[str, Tensor]: a dictionary of loss components
         """
-        assert voxel_semantics.min() >= 0 and voxel_semantics.max() <= 17
-
         occ_logits = self.forward(inputs)
         
         mask = kwargs[self.mask_key] if self.use_mask else None
+        voxel_semantics = kwargs['voxel_semantics']
 
         losses = dict()
         loss_occ = self.loss_single(voxel_semantics, mask, occ_logits)

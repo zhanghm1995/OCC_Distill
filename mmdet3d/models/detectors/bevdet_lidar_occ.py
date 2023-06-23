@@ -19,9 +19,15 @@ from .centerpoint import CenterPoint
 
 @DETECTORS.register_module()
 class BEVLidarOCC(CenterPoint):
+    """Deprecated BEVLidarOCC class since it is not compatiable with
+    the original mmdetection3d classes, please use the below `LidarOCC` class.
+
+    Args:
+        CenterPoint (_type_): _description_
+    """
     def __init__(self, 
-                 pts_bev_encoder_backbone,
-                 pts_bev_encoder_neck,
+                 pts_bev_encoder_backbone=None,
+                 pts_bev_encoder_neck=None,
                  loss_occ=None,
                  lidar_out_dim=32,
                  out_dim=32,
@@ -31,9 +37,12 @@ class BEVLidarOCC(CenterPoint):
                  **kwargs):
         super(BEVLidarOCC, self).__init__(**kwargs)
         
-        self.pts_bev_encoder_backbone = \
-            builder.build_backbone(pts_bev_encoder_backbone)
-        self.pts_bev_encoder_neck = builder.build_neck(pts_bev_encoder_neck)
+        if pts_bev_encoder_backbone:
+            self.pts_bev_encoder_backbone = builder.build_backbone(
+                pts_bev_encoder_backbone)
+        if pts_bev_encoder_neck:
+            self.pts_bev_encoder_neck = builder.build_neck(
+                pts_bev_encoder_neck)
 
         self.out_dim = out_dim
         out_channels = out_dim if use_predicter else num_classes
@@ -183,3 +192,92 @@ class BEVLidarOCC(CenterPoint):
         if self.use_predicter:
             occ_pred = self.predicter(occ_pred)
         return occ_pred
+    
+
+@DETECTORS.register_module()
+class LidarOCC(CenterPoint):
+
+    def __init__(self, 
+                 occ_head=None,
+                 **kwargs):
+        super(LidarOCC, self).__init__(**kwargs)
+        self.occ_head = builder.build_head(occ_head)
+
+    def forward_train(self,
+                      points=None,
+                      img_metas=None,
+                      img_inputs=None,
+                      **kwargs):
+        """Forward function for BEV Lidar OCC.
+        """
+        _, pts_feats = self.extract_feat(
+            points, img=img_inputs, img_metas=img_metas)
+        
+        loss_occ = self.occ_head.forward_train(pts_feats, 
+                                               **kwargs)
+        return loss_occ
+    
+    def extract_pts_feat(self, pts, img_feats, img_metas):
+        voxels, num_points, coors = self.voxelize(pts)
+        voxel_features = self.pts_voxel_encoder(voxels, num_points, coors)
+        batch_size = coors[-1, 0] + 1
+        x = self.pts_middle_encoder(voxel_features, coors, batch_size)
+        x = self.pts_backbone(x)
+        if self.with_pts_neck:
+            x = self.pts_neck(x)
+        return x
+    
+    def simple_test(self,
+                    points,
+                    img_metas,
+                    img=None,
+                    rescale=False,
+                    **kwargs):
+        """Test function without augmentaiton."""
+        _, pts_feats = self.extract_feat(
+            points, img=img, img_metas=img_metas, **kwargs)
+        occ_pred = self.occ_head(pts_feats)
+        occ_score=occ_pred.softmax(-1)
+        occ_res=occ_score.argmax(-1)
+        occ_res = occ_res.squeeze(dim=0).cpu().numpy().astype(np.uint8)
+        return [occ_res]
+    
+    def get_intermediate_features(self, 
+                                  points, 
+                                  img, 
+                                  img_metas, 
+                                  return_loss=False,
+                                  logits_as_prob_feat=False,
+                                  **kwargs):       
+        """Obtain the features for cross-modality distillation when as a teacher
+        model.
+        """
+        voxels, num_points, coors = self.voxelize(points)
+
+        voxel_features = self.pts_voxel_encoder(voxels, num_points, coors)
+        batch_size = coors[-1, 0] + 1
+        low_feats = self.pts_middle_encoder(voxel_features, coors, batch_size)
+
+        x = self.pts_bev_encoder_backbone(low_feats)
+        high_feats = self.pts_bev_encoder_neck(x)
+
+        prob_feats = self.final_conv(high_feats).permute(0, 4, 3, 2, 1)
+        if self.use_predicter:
+            occ_pred = self.predicter(prob_feats)
+        else:
+            occ_pred = prob_feats
+
+        if logits_as_prob_feat:
+            prob_feats = occ_pred
+
+        if return_loss:
+            losses = dict()
+            voxel_semantics = kwargs['voxel_semantics']
+            mask_camera = kwargs['mask_camera']
+            
+            loss_occ = self.loss_single(voxel_semantics, mask_camera, occ_pred)
+            losses['teacher_loss_occ'] = loss_occ['loss_occ']
+
+            return (None, high_feats, prob_feats), losses
+        else:
+            return (low_feats, high_feats, prob_feats)
