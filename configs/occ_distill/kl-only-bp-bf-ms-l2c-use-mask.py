@@ -26,3 +26,11 @@ model = dict(
             type='KnowledgeDistillationKLDivLoss', 
             loss_weight=1.0)),
 )
+
+# Optimizer
+lr_config = dict(
+    policy='step',
+    warmup='linear',
+    warmup_iters=1000,
+    warmup_ratio=0.001,
+    step=[19,])
