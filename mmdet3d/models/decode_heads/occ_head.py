@@ -136,9 +136,17 @@ class OccDistillHead(BaseModule):
         super(OccDistillHead, self).__init__(init_cfg=init_cfg)
         self.use_kl_loss = use_kl_loss
         
-        self.loss_high_feat = build_loss(loss_high_feat)
+        if loss_high_feat is not None:
+            self.loss_high_feat = build_loss(loss_high_feat)
+        
         self.loss_prob_feat = build_loss(loss_prob_feat)
     
+    @property
+    def with_high_feat_loss(self):
+        """bool: Whether calculate the high-level feature alignment loss."""
+        return hasattr(self,
+                       'loss_high_feat') and self.loss_high_feat is not None
+
     def loss(self, 
              teacher_feats_list, 
              student_feats_list,
@@ -149,13 +157,17 @@ class OccDistillHead(BaseModule):
 
         if use_distill_mask:
             assert mask is not None
-            mask1 = repeat(mask, 'b h w d -> b c d h w', 
-                           c=student_feats_list[1].shape[1])
-            mask1 = mask1.to(torch.float32)
-            num_total_samples1 = mask1.sum()
-            high_feat_loss = self.loss_high_feat(
-                student_feats_list[1], teacher_feats_list[1], 
-                mask1, avg_factor=num_total_samples1)
+
+            if self.with_high_feat_loss:
+                mask1 = repeat(mask, 'b h w d -> b c d h w', 
+                            c=student_feats_list[1].shape[1])
+                mask1 = mask1.to(torch.float32)
+                num_total_samples1 = mask1.sum()
+                high_feat_loss = self.loss_high_feat(
+                    student_feats_list[1], teacher_feats_list[1], 
+                    mask1, avg_factor=num_total_samples1)
+                
+                losses['high_feat_loss'] = high_feat_loss
 
             if self.use_kl_loss:
                 mask2 = mask.reshape(-1)
@@ -183,7 +195,8 @@ class OccDistillHead(BaseModule):
                                                  teacher_feats_list[1])
             prob_feat_loss = self.loss_prob_feat(student_feats_list[2],
                                                  teacher_feats_list[2])
+            
+            losses['high_feat_loss'] = high_feat_loss
         
-        losses['high_feat_loss'] = high_feat_loss
         losses['prob_feat_loss'] = prob_feat_loss
         return losses
