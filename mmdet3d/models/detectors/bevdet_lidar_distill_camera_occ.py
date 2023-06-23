@@ -49,8 +49,6 @@ class BEVLidarDistillCameraOCC(Base3DDetector):
             # otherwise the teacher model will be re-initialized.
             # self.teacher_model._is_init = True
 
-        self.loss_distill = L1Loss(loss_weight=1.0)
-
         ## Define the distillation head
         if occ_distill_head:
             self.occ_distill_head = builder.build_head(occ_distill_head)
@@ -76,8 +74,6 @@ class BEVLidarDistillCameraOCC(Base3DDetector):
             teacher_feats_list, loss_teacher_occ = \
                 self.teacher_model.get_intermediate_features(
                     points, 
-                    img_inputs, 
-                    img_metas, 
                     return_loss=True,
                     logits_as_prob_feat=self.logits_as_prob_feat, 
                     **kwargs)

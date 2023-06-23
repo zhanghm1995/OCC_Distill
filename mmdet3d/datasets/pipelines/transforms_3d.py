@@ -67,6 +67,25 @@ class RandomDropPointsColor(object):
 
 
 @PIPELINES.register_module()
+class PointsConditionalFlip(object):
+
+    def __init__(self):
+        pass
+
+    def __call__(self, results):
+        assert 'flip_dx' in results.keys() and \
+            'flip_dy' in results.keys()
+        
+        if 'points' in results:
+            if results['flip_dx']:
+                results['points'].flip(bev_direction='vertical')
+
+            if results['flip_dy']:
+                results['points'].flip(bev_direction='horizontal')
+        return results
+        
+
+@PIPELINES.register_module()
 class RandomFlip3D(RandomFlip):
     """Flip the points & bbox.
 

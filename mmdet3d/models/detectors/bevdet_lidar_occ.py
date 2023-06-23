@@ -99,7 +99,6 @@ class BEVLidarOCC(CenterPoint):
         occ_pred = self.occ_head(pts_feats)
         voxel_semantics = kwargs['voxel_semantics']
         mask_camera = kwargs['mask_camera']
-        assert voxel_semantics.min() >= 0 and voxel_semantics.max() <= 17
         loss_occ = self.loss_single(voxel_semantics, mask_camera, occ_pred)
         losses.update(loss_occ)
         return losses
@@ -121,8 +120,8 @@ class BEVLidarOCC(CenterPoint):
     
     def get_intermediate_features(self, 
                                   points, 
-                                  img, 
-                                  img_metas, 
+                                  img=None, 
+                                  img_metas=None, 
                                   return_loss=False,
                                   logits_as_prob_feat=False,
                                   **kwargs):       

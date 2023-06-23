@@ -1121,6 +1121,11 @@ class LoadAnnotationsBEVDepth(object):
         post_rots, post_trans = results['img_inputs'][4:]
         results['img_inputs'] = (imgs, rots, trans, intrins, post_rots,
                                  post_trans, bda_rot)
+        
+        ## We use these two conditions in PointsConditionalFlip transform
+        results['flip_dx'] = flip_dx
+        results['flip_dy'] = flip_dy
+        
         if 'voxel_semantics' in results:
             if flip_dx:
                 results['voxel_semantics'] = results['voxel_semantics'][::-1,...].copy()
