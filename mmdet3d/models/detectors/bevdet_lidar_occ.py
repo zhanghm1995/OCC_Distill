@@ -236,8 +236,8 @@ class LidarOCC(CenterPoint):
         _, pts_feats = self.extract_feat(
             points, img=img, img_metas=img_metas, **kwargs)
         occ_pred = self.occ_head(pts_feats)
-        occ_score=occ_pred.softmax(-1)
-        occ_res=occ_score.argmax(-1)
+        occ_score = occ_pred.softmax(-1)
+        occ_res = occ_score.argmax(-1)
         occ_res = occ_res.squeeze(dim=0).cpu().numpy().astype(np.uint8)
         return [occ_res]
     
