@@ -116,6 +116,13 @@ def main_append_student_model():
 
 
 if __name__ == "__main__":
+    camera_ckpt_filename = "bevdet-r50-4d-stereo-cbgs.pth"
+    camera_ckpt = torch.load(camera_ckpt_filename, map_location="cpu")
+    new_state_dict = append_prefix(camera_ckpt['state_dict'], "student_model.")
+    camera_ckpt['state_dict'] = new_state_dict
+    torch.save(camera_ckpt, "bevdet-r50-4d-stereo-cbgs-as-student-model.pth")
+    exit(0)
+
     student_pretrained_filename = "work_dirs/bevdet-occ-r50-4d-stereo-24e/epoch_24_ema.pth"
     student_pretrained_checkpoint = torch.load(student_pretrained_filename, map_location="cpu")
 
