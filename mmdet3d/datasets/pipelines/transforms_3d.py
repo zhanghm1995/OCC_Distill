@@ -83,6 +83,44 @@ class PointsConditionalFlip(object):
             if results['flip_dy']:
                 results['points'].flip(bev_direction='horizontal')
         return results
+    
+
+@PIPELINES.register_module()
+class PointsOCCAugmentation(object):
+
+    def __init__(self, 
+                 is_train=False,
+                 flip_dx_ratio=0.5,
+                 flip_dy_ratio=0.5):
+        self.is_train = is_train
+        self.flip_dx_ratio = flip_dx_ratio
+        self.flip_dy_ratio = flip_dy_ratio
+
+    def sample_flip_augmentation(self):
+        if self.is_train:
+            flip_dx = np.random.uniform() < self.flip_dx_ratio
+            flip_dy = np.random.uniform() < self.flip_dy_ratio
+        else:
+            flip_dx = False
+            flip_dy = False
+        return flip_dx, flip_dy
+    
+    def __call__(self, results):
+        flip_dx, flip_dy = self.sample_flip_augmentation()
+        
+        assert 'points' in results.keys()
+
+        if flip_dx:
+            results['voxel_semantics'] = results['voxel_semantics'][::-1,...].copy()
+            results['mask_lidar'] = results['mask_lidar'][::-1,...].copy()
+            results['mask_camera'] = results['mask_camera'][::-1,...].copy()
+            results['points'].flip(bev_direction='vertical')
+        if flip_dy:
+            results['voxel_semantics'] = results['voxel_semantics'][:,::-1,...].copy()
+            results['mask_lidar'] = results['mask_lidar'][:,::-1,...].copy()
+            results['mask_camera'] = results['mask_camera'][:,::-1,...].copy()
+            results['points'].flip(bev_direction='horizontal')
+        return results
         
 
 @PIPELINES.register_module()

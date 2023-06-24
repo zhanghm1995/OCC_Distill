@@ -18,7 +18,8 @@ from .transforms_3d import (AffineResize, BackgroundPointsFilter,
                             PointShuffle, PointsRangeFilter,
                             RandomDropPointsColor, RandomFlip3D,
                             RandomJitterPoints, RandomRotate, RandomShiftScale,
-                            RangeLimitedRandomCrop, VoxelBasedPointSampler)
+                            RangeLimitedRandomCrop, VoxelBasedPointSampler,
+                            PointsConditionalFlip, PointsOCCAugmentation)
 
 __all__ = [
     'ObjectSample', 'RandomFlip3D', 'ObjectNoise', 'GlobalRotScaleTrans',
@@ -34,5 +35,6 @@ __all__ = [
     'LoadPointsFromDict', 'MultiViewWrapper', 'RandomRotate',
     'RangeLimitedRandomCrop', 'PrepareImageInputs',
     'LoadAnnotationsBEVDepth', 'PointToMultiViewDepth',
-    'LoadOccGTFromFile', 'PointToEgo'
+    'LoadOccGTFromFile', 'PointToEgo', 'PointsConditionalFlip',
+    'PointsOCCAugmentation'
 ]
