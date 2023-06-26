@@ -307,4 +307,4 @@ custom_hooks = [
     ),
 ]
 
-load_from="bevdet-r50-4d-stereo-cbgs.pth"
+load_from="bevdet-r50-4d-stereo-cbgs-as-student-model.pth"
