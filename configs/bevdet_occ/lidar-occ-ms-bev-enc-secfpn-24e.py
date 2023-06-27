@@ -74,6 +74,12 @@ train_pipeline = [
         load_dim=5,
         use_dim=5,
         file_client_args=file_client_args),
+    dict(
+        type='LoadPointsFromMultiSweeps',
+        sweeps_num=10,
+        use_dim=5,
+        file_client_args=file_client_args,
+        remove_close=True),
     dict(type='PointToEgo'),
     dict(type='PointsRangeFilter', point_cloud_range=point_cloud_range),
     dict(type='DefaultFormatBundle3D', class_names=class_names),
@@ -89,6 +95,12 @@ test_pipeline = [
         load_dim=5,
         use_dim=5,
         file_client_args=file_client_args),
+    dict(
+        type='LoadPointsFromMultiSweeps',
+        sweeps_num=10,
+        use_dim=5,
+        file_client_args=file_client_args,
+        remove_close=True),
     dict(type='PointToEgo'),
     dict(
         type='MultiScaleFlipAug3D',
@@ -122,14 +134,14 @@ share_data_config = dict(
 
 test_data_config = dict(
     pipeline=test_pipeline,
-    ann_file=data_root + 'bevdetv2-nuscenes_infos_val.pkl')
+    ann_file=data_root + 'bevdetv3-nuscenes_infos_val.pkl')
 
 data = dict(
     samples_per_gpu=4,
     workers_per_gpu=16,
     train=dict(
         data_root=data_root,
-        ann_file=data_root + 'bevdetv2-nuscenes_infos_train.pkl',
+        ann_file=data_root + 'bevdetv3-nuscenes_infos_train.pkl',
         pipeline=train_pipeline,
         classes=class_names,
         test_mode=False,
