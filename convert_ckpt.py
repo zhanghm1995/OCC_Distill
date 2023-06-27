@@ -103,19 +103,21 @@ def main_merge_student_teacher_models():
     torch.save(checkpoint, "bevdet-occ-r50-4d-stereo-24e-student_lidar-occ-teacher-model.pth")
 
 
-def main_append_student_model():
-    """Add the `student_model.` as prefix for the pre-trained models.
+def main_append_model_prefix(filename, prefix, save_path):
+    """Add the prefix for the pre-trained models. Update the `state_dict`.
     """
-    filename = "bevdet-r50-4d-stereo-cbgs.pth"
     checkpoint = torch.load(filename, map_location="cpu")
 
-    new_state_dict = append_prefix(checkpoint['state_dict'], 
-                                   prefix="student_model.")
+    new_state_dict = append_prefix(checkpoint['state_dict'], prefix)
     checkpoint['state_dict'] = new_state_dict
-    torch.save(checkpoint, "bevdet-r50-4d-stereo-cbgs-as-student-model.pth")
+    torch.save(checkpoint, save_path)
 
 
 if __name__ == "__main__":
+    filename = "./quarter-lidar-voxel-occ-pretrain-w-aug-24e.pth"
+    save_path = "./quarter-lidar-voxel-occ-pretrain-w-aug-24e-as-teacher-model.pth"
+    main_append_model_prefix(filename, prefix="teacher_model.", save_path=save_path)
+    exit(0)
     student_pretrained_filename = "work_dirs/bevdet-occ-r50-4d-stereo-24e/epoch_24_ema.pth"
     student_pretrained_checkpoint = torch.load(student_pretrained_filename, map_location="cpu")
 
