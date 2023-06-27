@@ -238,6 +238,9 @@ class OccDistillHead(BaseModule):
             curr_student_feat = F.normalize(curr_student_feat, dim=1)
             curr_teacher_feat = F.normalize(curr_teacher_feat, dim=1)
 
+            if self.detach_target:
+                curr_teacher_feat = curr_teacher_feat.detach()
+            
             affinity_loss = F.mse_loss(curr_student_feat, 
                                        curr_teacher_feat)
             all_batch_affinity_loss.append(affinity_loss)
