@@ -185,7 +185,8 @@ class LSSViewTransformer(BaseModule):
                 int(self.grid_size[0]),
                 int(self.grid_size[1])
             ]).to(feat)
-            dummy = torch.cat(dummy.unbind(dim=2), 1)
+            if self.collapse_z:
+                dummy = torch.cat(dummy.unbind(dim=2), 1)
             return dummy
         feat = feat.permute(0, 1, 3, 4, 2)
         bev_feat_shape = (depth.shape[0], int(self.grid_size[2]),
