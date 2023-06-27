@@ -121,9 +121,16 @@ class OccSimpleHead(BaseModule):
 
 @HEADS.register_module()
 class OccDistillHead(BaseModule):
+    """The head for calculating the distillation loss.
+
+    Args:
+        BaseModule (_type_): _description_
+    """
 
     def __init__(self,
                  use_kl_loss=False,
+                 use_affinity_loss=False,
+                 detach_target=False,
                  loss_high_feat=dict(
                     type='L1Loss',
                     loss_weight=1.0),
@@ -135,6 +142,8 @@ class OccDistillHead(BaseModule):
         
         super(OccDistillHead, self).__init__(init_cfg=init_cfg)
         self.use_kl_loss = use_kl_loss
+        self.use_affinity_loss = use_affinity_loss
+        self.detach_target = detach_target
         
         if loss_high_feat is not None:
             self.loss_high_feat = build_loss(loss_high_feat)
@@ -158,9 +167,15 @@ class OccDistillHead(BaseModule):
         if use_distill_mask:
             assert mask is not None
 
-            if self.with_high_feat_loss:
+            if self.use_affinity_loss:
+                high_feat_loss = self.compute_inter_affinity_loss(
+                    student_feats_list[1],
+                    teacher_feats_list[1],
+                    mask)
+                losses['high_feat_loss'] = high_feat_loss
+            elif self.with_high_feat_loss:
                 mask1 = repeat(mask, 'b h w d -> b c d h w', 
-                            c=student_feats_list[1].shape[1])
+                               c=student_feats_list[1].shape[1])
                 mask1 = mask1.to(torch.float32)
                 num_total_samples1 = mask1.sum()
                 high_feat_loss = self.loss_high_feat(
@@ -200,3 +215,32 @@ class OccDistillHead(BaseModule):
         
         losses['prob_feat_loss'] = prob_feat_loss
         return losses
+    
+    def compute_inter_affinity_loss(self,
+                                    student_feats,
+                                    teacher_feats,
+                                    mask):
+        bs = mask.shape[0]
+
+        student_feat = rearrange(student_feats, 'b c h w d -> b d h w c')
+        teacher_feat = rearrange(teacher_feats, 'b c h w d -> b d h w c')
+
+        all_batch_affinity_loss = []
+        for i in range(bs):
+            curr_mask = mask[i]
+
+            curr_student_feat = student_feat[i][curr_mask]  # to (N, C)
+            curr_teacher_feat = teacher_feat[i][curr_mask]
+
+            curr_student_feat = curr_student_feat.matmul(curr_student_feat.T)  # to (N, N)
+            curr_teacher_feat = curr_teacher_feat.matmul(curr_teacher_feat.T)
+
+            curr_student_feat = F.normalize(curr_student_feat, dim=1)
+            curr_teacher_feat = F.normalize(curr_teacher_feat, dim=1)
+
+            affinity_loss = F.mse_loss(curr_student_feat, 
+                                       curr_teacher_feat)
+            all_batch_affinity_loss.append(affinity_loss)
+        
+        all_batch_affinity_loss = torch.stack(all_batch_affinity_loss)
+        return all_batch_affinity_loss.mean()
