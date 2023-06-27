@@ -26,7 +26,7 @@ def modify_state_dict(state_dict1, state_dict2):
         state_dict1[key] = new_state_dict2[key]
 
 
-def append_prefix(state_dict, prefix="teacher_model."):
+def append_prefix(state_dict, prefix=None):
     """Append the prefix in the front of the keys of the state_dict
 
     Args:
@@ -36,6 +36,9 @@ def append_prefix(state_dict, prefix="teacher_model."):
     Returns:
         OrderedDcit: the new state dictionary
     """
+    if prefix is None:
+        return deepcopy(state_dict)
+    
     if not prefix.endswith('.'):
         prefix += '.'  # append '.' to the end of prefix if not exist
     
@@ -82,25 +85,28 @@ def update_state_dict_keys(state_dict,
     return new_state_dict 
 
 
-def main_merge_student_teacher_models():
-    ## Load the teacher model
-    filename = "work_dirs/bevdet-lidar-occ-voxel-multi-sweeps-24e/epoch_24_ema.pth"
-    checkpoint = torch.load(filename, map_location="cpu")
-    print(checkpoint.keys())
-    teacher_state_dict = append_prefix(checkpoint['state_dict'])
-
+def main_merge_student_teacher_models(stu_filename,
+                                      tea_filename,
+                                      save_path,
+                                      stu_prefix=None,
+                                      tea_prefix=None):
     ## Load the student model
-    student_pretrained_filename = "work_dirs/bevdet-occ-r50-4d-stereo-24e/epoch_24_ema.pth"
-    student_pretrained_checkpoint = torch.load(student_pretrained_filename, map_location="cpu")
+    student_pretrained_checkpoint = torch.load(stu_filename, map_location="cpu")
     print(student_pretrained_checkpoint.keys())
 
     student_state_dict = append_prefix(student_pretrained_checkpoint['state_dict'], 
-                                       prefix="student_model.")
+                                       prefix=stu_prefix)
+    
+    ## Load the teacher model
+    checkpoint = torch.load(tea_filename, map_location="cpu")
+    print(checkpoint.keys())
+    teacher_state_dict = append_prefix(checkpoint['state_dict'],
+                                       prefix=tea_prefix)
     
     ## Merge the student and teacher model
     new_state_dict = merge_state_dict([teacher_state_dict, student_state_dict])
     checkpoint['state_dict'] = new_state_dict
-    torch.save(checkpoint, "bevdet-occ-r50-4d-stereo-24e-student_lidar-occ-teacher-model.pth")
+    torch.save(checkpoint, save_path)
 
 
 def main_append_model_prefix(filename, prefix, save_path):
@@ -114,6 +120,14 @@ def main_append_model_prefix(filename, prefix, save_path):
 
 
 if __name__ == "__main__":
+    student_filename = "./quarter-bevdet-occ-r50-4d-stereo-24e.pth"
+    teacher_filename = "quarter-lidar-voxel-occ-pretrain-w-aug-24e-as-teacher-model.pth"
+    save_path = "./quarter-lidar-voxel-w-aug-as-teacher-bevdet-r50-4d-stereo-as-student.pth"
+    main_merge_student_teacher_models(student_filename, teacher_filename,
+                                      save_path=save_path,
+                                      stu_prefix="student_model.")
+    exit(0)
+
     filename = "./quarter-lidar-voxel-occ-pretrain-w-aug-24e.pth"
     save_path = "./quarter-lidar-voxel-occ-pretrain-w-aug-24e-as-teacher-model.pth"
     main_append_model_prefix(filename, prefix="teacher_model.", save_path=save_path)
