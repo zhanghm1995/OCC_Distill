@@ -120,6 +120,12 @@ def main_append_model_prefix(filename, prefix, save_path):
 
 
 if __name__ == "__main__":
+    filename = "quarter-bevdet-occ-r50-4d-stereo-24e.pth"
+    prefix = "student_model."
+    save_path = "bevdet-occ-r50-4d-stereo-24e-linear-sched-as-student-model-quarter.pth"
+    main_append_model_prefix(filename, prefix, save_path)
+    exit(0)
+
     student_filename = "./quarter-bevdet-occ-r50-4d-stereo-24e.pth"
     teacher_filename = "quarter-lidar-voxel-occ-pretrain-w-aug-24e-as-teacher-model.pth"
     save_path = "./quarter-lidar-voxel-w-aug-as-teacher-bevdet-r50-4d-stereo-as-student.pth"
