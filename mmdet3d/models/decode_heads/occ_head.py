@@ -221,16 +221,14 @@ class OccDistillHead(BaseModule):
                                     teacher_feats,
                                     mask):
         bs = mask.shape[0]
-
-        student_feat = rearrange(student_feats, 'b c h w d -> b d h w c')
-        teacher_feat = rearrange(teacher_feats, 'b c h w d -> b d h w c')
+        student_feats = rearrange(student_feats, 'b c d h w -> b h w d c')
+        teacher_feats = rearrange(teacher_feats, 'b c d h w -> b h w d c')
 
         all_batch_affinity_loss = []
         for i in range(bs):
-            curr_mask = mask[i]
-
-            curr_student_feat = student_feat[i][curr_mask]  # to (N, C)
-            curr_teacher_feat = teacher_feat[i][curr_mask]
+            curr_mask = mask[i].to(torch.bool)
+            curr_student_feat = student_feats[i][curr_mask]  # to (N, C)
+            curr_teacher_feat = teacher_feats[i][curr_mask]
 
             curr_student_feat = curr_student_feat.matmul(curr_student_feat.T)  # to (N, N)
             curr_teacher_feat = curr_teacher_feat.matmul(curr_teacher_feat.T)
