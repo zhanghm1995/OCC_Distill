@@ -47,7 +47,7 @@ model = dict(
                                                                       128)),
         encoder_paddings=((0, 0, 1), (0, 0, 1), (0, 0, [0, 1, 1]), (0, 0)),
         block_type='basicblock'),
-    pts_bev_encoder_backbone=dict(
+    pts_backbone=dict(
         type='CustomResNet3D',
         numC_input=128,
         num_layer=[1, 2, 4],
@@ -55,9 +55,10 @@ model = dict(
         num_channels=[numC_Trans,numC_Trans*2,numC_Trans*4],
         stride=[1,2,2],
         backbone_output_ids=[0,1,2]),
-    pts_bev_encoder_neck=dict(type='LSSFPN3D',
-                              in_channels=numC_Trans*7,
-                              out_channels=numC_Trans),
+    pts_neck=dict(
+        type='LSSFPN3D',
+        in_channels=numC_Trans*7,
+        out_channels=numC_Trans),
 )
 
 # Data
