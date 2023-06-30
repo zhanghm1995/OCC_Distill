@@ -29,8 +29,8 @@ class LoadOccGTFromFile(object):
 
         ## get the free_voxels which are not occupied by any object
         free_voxels = (semantics == 17)
-        free_voxels = free_voxels & mask_camera.astype(bool)
-        results['free_voxels'] = free_voxels
+        mask_camera_free = free_voxels & mask_camera.astype(bool)
+        results['mask_camera_free'] = mask_camera_free
 
         return results
 
@@ -1137,8 +1137,10 @@ class LoadAnnotationsBEVDepth(object):
                 results['voxel_semantics'] = results['voxel_semantics'][::-1,...].copy()
                 results['mask_lidar'] = results['mask_lidar'][::-1,...].copy()
                 results['mask_camera'] = results['mask_camera'][::-1,...].copy()
+                results['mask_camera_free'] = results['mask_camera_free'][::-1,...].copy()
             if flip_dy:
                 results['voxel_semantics'] = results['voxel_semantics'][:,::-1,...].copy()
                 results['mask_lidar'] = results['mask_lidar'][:,::-1,...].copy()
                 results['mask_camera'] = results['mask_camera'][:,::-1,...].copy()
+                results['mask_camera_free'] = results['mask_camera_free'][:,::-1,...].copy()
         return results
