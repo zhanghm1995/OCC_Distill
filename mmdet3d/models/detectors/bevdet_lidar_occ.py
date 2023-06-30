@@ -213,6 +213,7 @@ class LidarOCC(CenterPoint):
 
     def __init__(self, 
                  occ_head=None,
+                 use_free_occ_token=False,
                  **kwargs):
         super(LidarOCC, self).__init__(**kwargs)
         
@@ -270,8 +271,6 @@ class LidarOCC(CenterPoint):
     
     def get_intermediate_features(self, 
                                   points, 
-                                  img, 
-                                  img_metas, 
                                   return_loss=False,
                                   logits_as_prob_feat=False,
                                   **kwargs):       

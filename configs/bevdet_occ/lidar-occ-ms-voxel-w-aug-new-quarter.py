@@ -160,7 +160,6 @@ for key in ['val', 'train', 'test']:
 optimizer = dict(type='AdamW', lr=1e-4, weight_decay=1e-2)
 optimizer_config = dict(grad_clip=dict(max_norm=5, norm_type=2))
 
-## zhm: the original lr_config is as follows:
 lr_config = dict(
     policy='step',
     warmup='linear',

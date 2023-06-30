@@ -15,24 +15,6 @@ class_names = [
     'motorcycle', 'bicycle', 'pedestrian', 'traffic_cone'
 ]
 
-data_config = {
-    'cams': [
-        'CAM_FRONT_LEFT', 'CAM_FRONT', 'CAM_FRONT_RIGHT', 'CAM_BACK_LEFT',
-        'CAM_BACK', 'CAM_BACK_RIGHT'
-    ],
-    'Ncams':
-    6,
-    'input_size': (256, 704),
-    'src_size': (900, 1600),
-
-    # Augmentation
-    'resize': (-0.06, 0.11),
-    'rot': (-5.4, 5.4),
-    'flip': True,
-    'crop_h': (0.0, 0.0),
-    'resize_test': 0.00,
-}
-
 # Model
 point_cloud_range = [-40.0, -40.0, -1.0, 40.0, 40.0, 5.4]
 voxel_size = [0.05, 0.05, 0.05]
@@ -174,7 +156,6 @@ for key in ['val', 'train', 'test']:
 optimizer = dict(type='AdamW', lr=1e-4, weight_decay=1e-2)
 optimizer_config = dict(grad_clip=dict(max_norm=5, norm_type=2))
 
-## zhm: the original lr_config is as follows:
 lr_config = dict(
     policy='step',
     warmup='linear',
