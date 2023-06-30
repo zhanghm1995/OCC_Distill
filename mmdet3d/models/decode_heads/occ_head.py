@@ -259,8 +259,12 @@ class OccDistillHeadV2(BaseModule):
 
     def __init__(self,
                  detach_target=True,
+                 use_kl_loss=False,
                  loss_high_feat=dict(
                     type='L1Loss',
+                    loss_weight=1.0),
+                 loss_prob_feat=dict(
+                    type='L1Loss', 
                     loss_weight=1.0),
                  **kwargs):
         
@@ -270,6 +274,11 @@ class OccDistillHeadV2(BaseModule):
         
         if loss_high_feat is not None:
             self.loss_high_feat = build_loss(loss_high_feat)
+        
+        if use_kl_loss:
+            self.loss_prob_feat = build_loss(loss_prob_feat)
+
+        self.use_kl_loss = use_kl_loss
         
     @property
     def with_high_feat_loss(self):
@@ -293,16 +302,30 @@ class OccDistillHeadV2(BaseModule):
             mask1 = mask1.to(torch.float32)
             num_total_samples1 = mask1.sum()
 
+            teacher_feat = teacher_feats_list[1]
             if self.detach_target:
-                teacher_feat = teacher_feats_list[1].detach()
+                teacher_feat = teacher_feat.detach()
             high_feat_loss = self.loss_high_feat(
                 student_feats_list[1], teacher_feat, 
                 mask1, avg_factor=num_total_samples1)
             
             losses['high_feat_loss'] = high_feat_loss
+
+            if self.use_kl_loss:
+                mask2 = mask.reshape(-1)
+                num_total_samples2 = mask2.sum()
+
+                num_classes = student_feats_list[2].shape[4]
+
+                pred = student_feats_list[2].reshape(-1, num_classes)
+                target = teacher_feats_list[2].reshape(-1, num_classes)
+
+                prob_feat_loss = self.loss_prob_feat(
+                    pred, target,
+                    mask2, avg_factor=num_total_samples2)
+                losses['prob_feat_loss'] = prob_feat_loss
         else:
-            high_feat_loss = self.loss_high_feat(student_feats_list[1],
-                                                 teacher_feats_list[1])
-            losses['high_feat_loss'] = high_feat_loss
+            raise NotImplementedError
+        
         return losses
     
