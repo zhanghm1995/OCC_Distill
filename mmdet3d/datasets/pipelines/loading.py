@@ -27,6 +27,10 @@ class LoadOccGTFromFile(object):
         results['mask_lidar'] = mask_lidar
         results['mask_camera'] = mask_camera
 
+        ## get the free_voxels which are not occupied by any object
+        free_voxels = (semantics == 17)
+        free_voxels = free_voxels & mask_camera.astype(bool)
+        results['free_voxels'] = free_voxels
 
         return results
 

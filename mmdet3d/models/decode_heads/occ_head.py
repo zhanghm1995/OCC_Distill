@@ -24,7 +24,7 @@ class OccSimpleHead(BaseModule):
                  num_classes,
                  use_mask=True,
                  mask_key="mask_camera",
-                 in_channels=128,
+                 in_channels=32,
                  out_channels=32,
                  loss_occ=dict(
                     type='CrossEntropyLoss',
@@ -198,7 +198,7 @@ class OccDistillHead(BaseModule):
                     mask2, avg_factor=num_total_samples2)
             else:
                 mask2 = repeat(mask, 'b h w d -> b h w d c', 
-                            c=student_feats_list[2].shape[4])
+                               c=student_feats_list[2].shape[4])
                 mask2 = mask2.to(torch.float32)
                 num_total_samples2 = mask2.sum()
                 prob_feat_loss = self.loss_prob_feat(
@@ -245,3 +245,62 @@ class OccDistillHead(BaseModule):
         
         all_batch_affinity_loss = torch.stack(all_batch_affinity_loss)
         return all_batch_affinity_loss.mean()
+    
+
+@HEADS.register_module()
+class OccDistillHeadV2(BaseModule):
+    """The head for calculating the distillation loss.
+
+    Args:
+        BaseModule (_type_): _description_
+    """
+
+    def __init__(self,
+                 detach_target=True,
+                 loss_high_feat=dict(
+                    type='L1Loss',
+                    loss_weight=1.0),
+                 **kwargs):
+        
+        super(OccDistillHeadV2, self).__init__()
+
+        self.detach_target = detach_target
+        
+        if loss_high_feat is not None:
+            self.loss_high_feat = build_loss(loss_high_feat)
+        
+    @property
+    def with_high_feat_loss(self):
+        """bool: Whether calculate the high-level feature alignment loss."""
+        return hasattr(self,
+                       'loss_high_feat') and self.loss_high_feat is not None
+
+    def loss(self, 
+             teacher_feats_list, 
+             student_feats_list,
+             use_distill_mask=False,
+             mask=None):
+        
+        losses = dict()
+
+        if use_distill_mask:
+            assert mask is not None
+
+            mask1 = repeat(mask, 'b h w d -> b c d h w', 
+                            c=student_feats_list[1].shape[1])
+            mask1 = mask1.to(torch.float32)
+            num_total_samples1 = mask1.sum()
+
+            if self.detach_target:
+                teacher_feat = teacher_feats_list[1].detach()
+            high_feat_loss = self.loss_high_feat(
+                student_feats_list[1], teacher_feat, 
+                mask1, avg_factor=num_total_samples1)
+            
+            losses['high_feat_loss'] = high_feat_loss
+        else:
+            high_feat_loss = self.loss_high_feat(student_feats_list[1],
+                                                 teacher_feats_list[1])
+            losses['high_feat_loss'] = high_feat_loss
+        return losses
+    

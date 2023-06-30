@@ -34,6 +34,7 @@ class BEVLidarOCC(CenterPoint):
                  use_mask=True,
                  num_classes=18,
                  use_predicter=True, 
+                 use_free_occ_token=False,
                  **kwargs):
         super(BEVLidarOCC, self).__init__(**kwargs)
         
@@ -58,9 +59,14 @@ class BEVLidarOCC(CenterPoint):
             self.predicter = nn.Sequential(
                 nn.Linear(self.out_dim, self.out_dim*2),
                 nn.Softplus(),
-                nn.Linear(self.out_dim*2, num_classes),
-            )
-        self.pts_bbox_head = None
+                nn.Linear(self.out_dim*2, num_classes))
+        
+        if use_free_occ_token:
+            self.free_occ_token = nn.Parameter(
+                torch.randn(1, out_channels, 1, 1, 1))
+        
+        self.use_free_occ_token = use_free_occ_token
+        
         self.use_mask = use_mask
         self.num_classes = num_classes
         self.loss_occ = build_loss(loss_occ)
@@ -135,9 +141,18 @@ class BEVLidarOCC(CenterPoint):
         low_feats = self.pts_middle_encoder(voxel_features, coors, batch_size)
 
         x = self.pts_bev_encoder_backbone(low_feats)
-        high_feats = self.pts_bev_encoder_neck(x)
-
+        high_feats = self.pts_bev_encoder_neck(x)  # to (b, c, d, h, w)
+        
+        if self.use_free_occ_token:
+            free_voxels = kwargs['free_voxels']  # the flag for voxels that are free
+            free_voxels = rearrange(free_voxels, 'b h w d -> b () d h w')
+            free_voxels = free_voxels.to(torch.float32)
+            # free_voxels_token = rearrange(self.free_occ_token, 'c -> () c () () ()')
+            high_feats = free_voxels * self.free_occ_token + (1 - free_voxels) * high_feats
+        
+        ## get the prob_feat with shape (B, C, D, H, W)
         prob_feats = self.final_conv(high_feats).permute(0, 4, 3, 2, 1)
+
         if self.use_predicter:
             occ_pred = self.predicter(prob_feats)
         else:
@@ -200,8 +215,16 @@ class LidarOCC(CenterPoint):
                  occ_head=None,
                  **kwargs):
         super(LidarOCC, self).__init__(**kwargs)
-        self.occ_head = builder.build_head(occ_head)
+        
+        if occ_head:
+            self.occ_head = builder.build_head(occ_head)
 
+    @property
+    def with_occ_head(self):
+        """bool: Whether the detector has a 3D box head."""
+        return hasattr(self,
+                       'occ_head') and self.occ_head is not None
+    
     def forward_train(self,
                       points=None,
                       img_metas=None,
@@ -235,6 +258,10 @@ class LidarOCC(CenterPoint):
         """Test function without augmentaiton."""
         _, pts_feats = self.extract_feat(
             points, img=img, img_metas=img_metas, **kwargs)
+        
+        if not self.with_occ_head:
+            return pts_feats
+        
         occ_pred = self.occ_head(pts_feats)
         occ_score = occ_pred.softmax(-1)
         occ_res = occ_score.argmax(-1)
