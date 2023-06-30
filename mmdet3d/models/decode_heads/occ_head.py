@@ -85,6 +85,8 @@ class OccSimpleHead(BaseModule):
     def forward(self, x):
         if isinstance(x, list):
             feats = x[0]
+        else:
+            feats = x
         
         if feats.dim() == 4:
             feats = rearrange(
