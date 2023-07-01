@@ -118,6 +118,14 @@ class BEVLidarOCC(CenterPoint):
         """Test function without augmentaiton."""
         _, pts_feats = self.extract_feat(
             points, img=img, img_metas=img_metas, **kwargs)
+        
+        if self.use_free_occ_token:
+            free_voxels = kwargs['mask_camera_free']  # the flag for voxels that are free
+            free_voxels = rearrange(free_voxels, 'b h w d -> b () d h w')
+            free_voxels = free_voxels.to(torch.float32)
+            # free_voxels_token = rearrange(self.free_occ_token, 'c -> () c () () ()')
+            pts_feats = free_voxels * self.free_occ_token + (1 - free_voxels) * pts_feats
+        
         occ_pred = self.occ_head(pts_feats)
         occ_score=occ_pred.softmax(-1)
         occ_res=occ_score.argmax(-1)
@@ -272,6 +280,12 @@ class LidarOCC(CenterPoint):
         """Test function without augmentaiton."""
         _, pts_feats = self.extract_feat(
             points, img=img, img_metas=img_metas, **kwargs)
+        
+        if self.use_free_occ_token:
+            free_voxels = kwargs['mask_camera_free']  # the flag for voxels that are free
+            free_voxels = rearrange(free_voxels, 'b h w d -> b () d h w')
+            free_voxels = free_voxels.to(torch.float32)
+            pts_feats = free_voxels * self.free_occ_token + (1 - free_voxels) * pts_feats
         
         if not self.with_occ_head:
             return pts_feats

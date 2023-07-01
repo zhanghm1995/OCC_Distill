@@ -91,7 +91,9 @@ class BEVLidarDistillCameraOCC(Base3DDetector):
         assert len(teacher_feats_list) == len(student_feats_list)
         distill_loss_dict = self.occ_distill_head.loss(
             teacher_feats_list, student_feats_list,
-            self.use_distill_mask, mask=kwargs['mask_camera'])
+            self.use_distill_mask, 
+            mask=kwargs['mask_camera'],
+            **kwargs)
         
         losses.update(distill_loss_dict)
         losses.update(loss_student_occ)

@@ -254,12 +254,18 @@ class OccDistillHeadV2(BaseModule):
     """The head for calculating the distillation loss.
 
     Args:
-        BaseModule (_type_): _description_
+        detach_target (bool, optional): _description_. Defaults to True.
+        use_kl_loss (bool, optional): _description_. Defaults to False.
+        only_align_fg (bool, optional): only align the foreground features. 
+          Defaults to False.
+        loss_high_feat (_type_, optional): _description_. Defaults to dict( type='L1Loss', loss_weight=1.0).
+        loss_prob_feat (_type_, optional): _description_. Defaults to dict( type='L1Loss', loss_weight=1.0).
     """
 
     def __init__(self,
                  detach_target=True,
                  use_kl_loss=False,
+                 only_align_fg=False,
                  loss_high_feat=dict(
                     type='L1Loss',
                     loss_weight=1.0),
@@ -279,6 +285,7 @@ class OccDistillHeadV2(BaseModule):
             self.loss_prob_feat = build_loss(loss_prob_feat)
 
         self.use_kl_loss = use_kl_loss
+        self.only_align_fg = only_align_fg
         
     @property
     def with_high_feat_loss(self):
@@ -289,25 +296,52 @@ class OccDistillHeadV2(BaseModule):
     def loss(self, 
              teacher_feats_list, 
              student_feats_list,
-             use_distill_mask=False,
-             mask=None):
+             use_distill_mask=True,
+             mask=None,
+             **kwargs):
+        """Compute the distillation losses.
+
+        Args:
+            teacher_feats_list (_type_): _description_
+            student_feats_list (_type_): _description_
+            use_distill_mask (bool, optional): Whether to use the 
+              `mask_camera` or `mask_lidar` when computing the distillation losses. 
+              Defaults to True.
+            mask (_type_, optional): The `mask_camera` or `mask_lidar` to
+              represent the visibility of sensors. Defaults to None.
+
+        Raises:
+            NotImplementedError: _description_
+
+        Returns:
+            _type_: _description_
+        """
         
         losses = dict()
 
         if use_distill_mask:
             assert mask is not None
 
-            mask1 = repeat(mask, 'b h w d -> b c d h w', 
-                            c=student_feats_list[1].shape[1])
+            if self.only_align_fg:
+                non_empty_mask = (kwargs['voxel_semantics'] != 17)
+                fg_mask = non_empty_mask & mask 
+                mask1 = repeat(fg_mask, 'b h w d -> b c d h w', 
+                               c=student_feats_list[1].shape[1])
+            else:
+                mask1 = repeat(mask, 'b h w d -> b c d h w', 
+                               c=student_feats_list[1].shape[1])
+            
             mask1 = mask1.to(torch.float32)
             num_total_samples1 = mask1.sum()
 
+            student_feat = student_feats_list[1]
             teacher_feat = teacher_feats_list[1]
+
             if self.detach_target:
                 teacher_feat = teacher_feat.detach()
             
             high_feat_loss = self.loss_high_feat(
-                student_feats_list[1], teacher_feat, 
+                student_feat, teacher_feat, 
                 mask1, avg_factor=num_total_samples1)
             
             losses['high_feat_loss'] = high_feat_loss
