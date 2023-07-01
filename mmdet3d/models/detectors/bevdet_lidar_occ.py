@@ -220,6 +220,12 @@ class LidarOCC(CenterPoint):
         if occ_head:
             self.occ_head = builder.build_head(occ_head)
 
+        if use_free_occ_token:
+            self.free_occ_token = nn.Parameter(
+                torch.randn(1, 32, 1, 1, 1))
+        
+        self.use_free_occ_token = use_free_occ_token
+
     @property
     def with_occ_head(self):
         """bool: Whether the detector has a 3D box head."""
@@ -236,6 +242,13 @@ class LidarOCC(CenterPoint):
         _, pts_feats = self.extract_feat(
             points, img=img_inputs, img_metas=img_metas)
         
+        if self.use_free_occ_token:
+            free_voxels = kwargs['mask_camera_free']  # the flag for voxels that are free
+            free_voxels = rearrange(free_voxels, 'b h w d -> b () d h w')
+            free_voxels = free_voxels.to(torch.float32)
+            # free_voxels_token = rearrange(self.free_occ_token, 'c -> () c () () ()')
+            pts_feats = free_voxels * self.free_occ_token + (1 - free_voxels) * pts_feats
+
         loss_occ = self.occ_head.forward_train(pts_feats, 
                                                **kwargs)
         return loss_occ

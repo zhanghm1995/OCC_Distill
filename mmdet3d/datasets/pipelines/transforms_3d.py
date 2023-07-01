@@ -114,11 +114,13 @@ class PointsOCCAugmentation(object):
             results['voxel_semantics'] = results['voxel_semantics'][::-1,...].copy()
             results['mask_lidar'] = results['mask_lidar'][::-1,...].copy()
             results['mask_camera'] = results['mask_camera'][::-1,...].copy()
+            results['mask_camera_free'] = results['mask_camera_free'][::-1,...].copy()
             results['points'].flip(bev_direction='vertical')
         if flip_dy:
             results['voxel_semantics'] = results['voxel_semantics'][:,::-1,...].copy()
             results['mask_lidar'] = results['mask_lidar'][:,::-1,...].copy()
             results['mask_camera'] = results['mask_camera'][:,::-1,...].copy()
+            results['mask_camera_free'] = results['mask_camera_free'][:,::-1,...].copy()
             results['points'].flip(bev_direction='horizontal')
         return results
         

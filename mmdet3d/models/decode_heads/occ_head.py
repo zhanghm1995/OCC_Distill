@@ -305,6 +305,7 @@ class OccDistillHeadV2(BaseModule):
             teacher_feat = teacher_feats_list[1]
             if self.detach_target:
                 teacher_feat = teacher_feat.detach()
+            
             high_feat_loss = self.loss_high_feat(
                 student_feats_list[1], teacher_feat, 
                 mask1, avg_factor=num_total_samples1)
