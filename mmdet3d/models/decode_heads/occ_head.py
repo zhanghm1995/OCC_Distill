@@ -162,7 +162,8 @@ class OccDistillHead(BaseModule):
              teacher_feats_list, 
              student_feats_list,
              use_distill_mask=False,
-             mask=None):
+             mask=None,
+             **kwargs):
         
         losses = dict()
 

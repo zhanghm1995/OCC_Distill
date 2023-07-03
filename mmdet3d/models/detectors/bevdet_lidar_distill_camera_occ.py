@@ -27,9 +27,10 @@ class BEVLidarDistillCameraOCC(Base3DDetector):
                  student_model=None,
                  logits_as_prob_feat=False,
                  freeze_teacher_branch=True,
-                 init_cfg=None,
                  use_distill_mask=False,
                  occ_distill_head=None,
+                 use_cross_kd=False,
+                 init_cfg=None,
                  **kwargs):
         
         super(BEVLidarDistillCameraOCC, self).__init__(init_cfg=init_cfg)
@@ -37,6 +38,7 @@ class BEVLidarDistillCameraOCC(Base3DDetector):
         self.logits_as_prob_feat = logits_as_prob_feat
         self.use_distill_mask = use_distill_mask
         self.freeze_teacher_branch = freeze_teacher_branch
+        self.use_cross_kd = use_cross_kd
 
         self.teacher_model = builder.build_detector(teacher_model)
         self.student_model = builder.build_detector(student_model)
@@ -89,6 +91,10 @@ class BEVLidarDistillCameraOCC(Base3DDetector):
         
         ## Compute the distillation losses
         assert len(teacher_feats_list) == len(student_feats_list)
+        
+        if self.use_cross_kd:
+            student_high_feat = student_feats_list[1]
+            
         distill_loss_dict = self.occ_distill_head.loss(
             teacher_feats_list, student_feats_list,
             self.use_distill_mask, 
@@ -107,7 +113,7 @@ class BEVLidarDistillCameraOCC(Base3DDetector):
                     **kwargs):
         """Test function using the student model and without augmentaiton."""
         ## Forward the student model and get the loss
-        results = self.student_model.simple_test(
+        results = self.teacher_model.simple_test(
             points, img_metas, img, rescale=rescale, **kwargs)
         return results
     
