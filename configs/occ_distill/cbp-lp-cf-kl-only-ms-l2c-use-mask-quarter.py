@@ -21,7 +21,10 @@ model = dict(
             loss_weight=0.0),
         loss_prob_feat=dict(
             type='KnowledgeDistillationKLDivLoss', 
-            loss_weight=0.1)),
+            loss_weight=0.1,
+            T=1)),
 )
+
+optimizer = dict(type='AdamW', lr=2e-4, weight_decay=1e-2)
 
 load_from = "bevdet-r50-4d-stereo-as-student-lidar-voxel-w-aug-as-teacher-quarter.pth"

@@ -113,7 +113,7 @@ class BEVLidarDistillCameraOCC(Base3DDetector):
                     **kwargs):
         """Test function using the student model and without augmentaiton."""
         ## Forward the student model and get the loss
-        results = self.teacher_model.simple_test(
+        results = self.student_model.simple_test(
             points, img_metas, img, rescale=rescale, **kwargs)
         return results
     
