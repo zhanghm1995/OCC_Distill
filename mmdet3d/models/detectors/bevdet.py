@@ -49,12 +49,19 @@ class BEVDet(CenterPoint):
         return x, stereo_feat
 
     @force_fp32()
-    def bev_encoder(self, x):
+    def bev_encoder(self, x, return_ms_feats=False):
         x = self.img_bev_encoder_backbone(x)
-        x = self.img_bev_encoder_neck(x)
-        if type(x) in [list, tuple]:
-            x = x[0]
-        return x
+
+        if not return_ms_feats:
+            x = self.img_bev_encoder_neck(x)
+            if type(x) in [list, tuple]:
+                x = x[0]
+            return x
+        else:
+            x, ms_feats = self.img_bev_encoder_neck(x, return_ms_feats=True)
+            if type(x) in [list, tuple]:
+                x = x[0]
+            return x, ms_feats
 
     def prepare_inputs(self, inputs):
         # split the inputs into each frame
@@ -627,6 +634,7 @@ class BEVStereo4D(BEVDepth4D):
                          img_metas,
                          pred_prev=False,
                          sequential=False,
+                         return_ms_feats=True,
                          **kwargs):
         if sequential:
             # Todo
@@ -691,5 +699,9 @@ class BEVStereo4D(BEVDepth4D):
                                         sensor2keyegos[self.num_frame-2-adj_id]],
                                        bda)
         bev_feat = torch.cat(bev_feat_list, dim=1)
+        if return_ms_feats:
+            x, ms_feats = self.bev_encoder(bev_feat, return_ms_feats=True)
+            return [x], depth_key_frame, ms_feats
+        
         x = self.bev_encoder(bev_feat)
         return [x], depth_key_frame

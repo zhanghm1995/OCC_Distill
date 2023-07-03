@@ -125,7 +125,7 @@ class LSSFPN3D(nn.Module):
             act_cfg=dict(type='ReLU',inplace=True))
         self.with_cp = with_cp
 
-    def forward(self, feats):
+    def forward(self, feats, return_ms_feats=False):
         x_8, x_16, x_32 = feats
         x_16 = self.up1(x_16)
         x_32 = self.up2(x_32)
@@ -134,4 +134,6 @@ class LSSFPN3D(nn.Module):
             x = checkpoint(self.conv, x)
         else:
             x = self.conv(x)
+        if return_ms_feats:
+            return x, [x_8, x_16, x_32]
         return x

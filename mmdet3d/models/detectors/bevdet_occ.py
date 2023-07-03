@@ -5,9 +5,12 @@ import torch
 from mmdet.models import DETECTORS
 from mmdet.models.builder import build_loss
 from mmcv.cnn.bricks.conv_module import ConvModule
+from mmcv.runner import force_fp32
+
 from torch import nn
 import numpy as np
 from einops import repeat, rearrange
+from .. import builder
 
 
 @DETECTORS.register_module()
@@ -168,6 +171,113 @@ class BEVStereo4DOCC(BEVStereo4D):
         else:
             return (None, img_feats[0], prob_feats)
 
+
+@DETECTORS.register_module()
+class MultiScaleBEVStereo4DOCC(BEVStereo4DOCC):
+
+    def __init__(self,
+                 use_ms_loss=True,
+                 occ_ms_head1=None,
+                 occ_ms_head2=None,
+                 occ_ms_head3=None,
+                 **kwargs):
+        super(MultiScaleBEVStereo4DOCC, self).__init__(**kwargs)
+
+        self.use_ms_loss = use_ms_loss
+        if use_ms_loss:
+            ms_occ_head1 = builder.build_head(occ_ms_head1)
+            ms_occ_head2 = builder.build_head(occ_ms_head2)
+            ms_occ_head3 = builder.build_head(occ_ms_head3)
+            blocks = [ms_occ_head1, ms_occ_head2, ms_occ_head3]
+            self.ms_head_blocks = nn.ModuleList(blocks)
+
+    def simple_test(self,
+                    points,
+                    img_metas,
+                    img=None,
+                    rescale=False,
+                    **kwargs):
+        """Test function without augmentaiton."""
+        img_feats, _, _ = self.extract_feat(
+            points, img=img, img_metas=img_metas, **kwargs)
+        occ_pred = self.final_conv(img_feats[0]).permute(0, 4, 3, 2, 1)
+        # bncdhw->bnwhdc
+        if self.use_predicter:
+            occ_pred = self.predicter(occ_pred)
+        occ_score=occ_pred.softmax(-1)
+        occ_res=occ_score.argmax(-1)
+        occ_res = occ_res.squeeze(dim=0).cpu().numpy().astype(np.uint8)
+        return [occ_res]
+
+    def forward_train(self,
+                      points=None,
+                      img_metas=None,
+                      gt_bboxes_3d=None,
+                      gt_labels_3d=None,
+                      gt_labels=None,
+                      gt_bboxes=None,
+                      img_inputs=None,
+                      proposals=None,
+                      gt_bboxes_ignore=None,
+                      **kwargs):
+        """Forward training function.
+
+        Returns:
+            dict: Losses of different branches.
+        """
+        img_feats, pts_feats, depth, ms_feats = self.extract_feat(
+            points, img=img_inputs, img_metas=img_metas, 
+            return_ms_feats=True, **kwargs)
+        
+        gt_depth = kwargs['gt_depth']
+        losses = dict()
+        loss_depth = self.img_view_transformer.get_depth_loss(gt_depth, depth)
+        losses['loss_depth'] = loss_depth
+
+        occ_pred = self.final_conv(img_feats[0]).permute(0, 4, 3, 2, 1) # bncdhw->bnwhdc
+        if self.use_predicter:
+            occ_pred = self.predicter(occ_pred)
+        voxel_semantics = kwargs['voxel_semantics']
+        mask_camera = kwargs['mask_camera']
+        assert voxel_semantics.min() >= 0 and voxel_semantics.max() <= 17
+        loss_occ = self.loss_single(voxel_semantics, mask_camera, occ_pred)
+        losses.update(loss_occ)
+
+        ## add the multi-scale losses
+        if self.use_ms_loss:
+            ms_losses = self.compute_ms_occ_losses(ms_feats, **kwargs)
+            losses.update(ms_losses)
+        return losses
+    
+    def extract_feat(self, points, img, img_metas, 
+                     return_ms_feats=False,
+                     **kwargs):
+        """Extract features from images and points."""
+        pts_feats = None
+
+        if return_ms_feats:
+            img_feats, depth, ms_feats = self.extract_img_feat(
+                img, 
+                img_metas, 
+                return_ms_feats=True,
+                **kwargs)
+            return img_feats, pts_feats, depth, ms_feats
+        else:
+            img_feats, depth = self.extract_img_feat(
+                img, 
+                img_metas, 
+                return_ms_feats=False,
+                **kwargs)
+            return img_feats, pts_feats, depth
+    
+    def compute_ms_occ_losses(self, ms_feats, **kwargs):
+        losses = dict()
+        for i, feat in enumerate(ms_feats):
+            loss = self.ms_head_blocks[i].forward_train(feat, **kwargs)
+            loss_name = f'ms_occ_loss{i}'
+            losses[loss_name] = loss['loss_occ']
+        return losses
+    
 
 class SE_Block(nn.Module):
     def __init__(self, c, mode='2d'):
