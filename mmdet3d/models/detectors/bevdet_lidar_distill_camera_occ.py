@@ -94,6 +94,12 @@ class BEVLidarDistillCameraOCC(Base3DDetector):
         
         if self.use_cross_kd:
             student_high_feat = student_feats_list[1]
+            # we use the teacher head to get the student prob feature
+            student_prob_feat = self.teacher_model.final_conv(
+                student_high_feat).permute(0, 4, 3, 2, 1)
+            student_prob_feat = self.teacher_model.predicter(
+                student_prob_feat)
+            student_feats_list[2] = student_prob_feat
             
         distill_loss_dict = self.occ_distill_head.loss(
             teacher_feats_list, student_feats_list,
