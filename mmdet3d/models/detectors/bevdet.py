@@ -634,7 +634,7 @@ class BEVStereo4D(BEVDepth4D):
                          img_metas,
                          pred_prev=False,
                          sequential=False,
-                         return_ms_feats=True,
+                         return_ms_feats=False,
                          **kwargs):
         if sequential:
             # Todo

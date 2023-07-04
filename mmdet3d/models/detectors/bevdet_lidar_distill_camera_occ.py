@@ -93,6 +93,9 @@ class BEVLidarDistillCameraOCC(Base3DDetector):
         assert len(teacher_feats_list) == len(student_feats_list)
         
         if self.use_cross_kd:
+            # convert from tuple to list
+            student_feats_list = list(student_feats_list)
+
             student_high_feat = student_feats_list[1]
             # we use the teacher head to get the student prob feature
             student_prob_feat = self.teacher_model.final_conv(

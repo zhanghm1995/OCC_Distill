@@ -12,6 +12,7 @@ _base_ = ['./lp-cf-ms-l2c-use-mask-quarter.py']
 model = dict(
     freeze_teacher_branch=True,
     logits_as_prob_feat=True,
+    use_cross_kd=True,
 
     occ_distill_head=dict(
         type='OccDistillHead',
