@@ -167,6 +167,8 @@ train_pipeline = [
         file_client_args=file_client_args),
     dict(type='PointToMultiViewDepth', downsample=1, grid_config=grid_config),
     dict(type='PointToEgo'),
+    dict(type='PointsRangeFilter', point_cloud_range=point_cloud_range),
+    dict(type='PointsConditionalFlip'),
     dict(type='DefaultFormatBundle3D', class_names=class_names),
     dict(
         type='Collect3D', keys=['points', 'img_inputs', 'gt_depth', 'voxel_semantics',
@@ -187,6 +189,7 @@ test_pipeline = [
         use_dim=[0,1,2,4],
         file_client_args=file_client_args),
     dict(type='PointToEgo'),
+    dict(type='PointsConditionalFlip'),
     dict(
         type='MultiScaleFlipAug3D',
         img_scale=(1333, 800),
