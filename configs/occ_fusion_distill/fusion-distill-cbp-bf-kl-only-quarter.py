@@ -260,6 +260,11 @@ for key in ['val', 'train', 'test']:
 # Optimizer
 optimizer = dict(type='AdamW', lr=1e-4, weight_decay=1e-2)
 optimizer_config = dict(grad_clip=dict(max_norm=5, norm_type=2))
+## set lower lr for point cloud branch
+paramwise_cfg = dict(custom_keys={
+    '.pts_middle_encoder': dict(lr_mult=0.1, decay_mult=0.95),
+    '.pts_backbone': dict(lr_mult=0.1, decay_mult=0.95),
+    '.pts_neck': dict(lr_mult=0.1, decay_mult=0.95),})
 
 ## zhm: the original lr_config is as follows:
 lr_config = dict(
