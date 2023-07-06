@@ -480,10 +480,19 @@ class BEVFusionStereo4DOCCDistill(BEVFusionStereo4DOCC):
 
     def __init__(self,
                  camera_occ_head=None,
+                 use_high_feat_align=False,
+                 loss_high_feat=dict(
+                    type='L1Loss',
+                    loss_weight=1.0),
                  **kwargs):
         super(BEVFusionStereo4DOCCDistill, self).__init__(**kwargs)
         
         self.camera_occ_head = builder.build_head(camera_occ_head)
+
+        self.use_high_feat_align = use_high_feat_align
+        
+        if use_high_feat_align:
+            self.loss_high_feat = build_loss(loss_high_feat)
 
     def extract_feat(self, points, img, img_metas, **kwargs):
         """Extract features from images and points."""
@@ -543,6 +552,10 @@ class BEVFusionStereo4DOCCDistill(BEVFusionStereo4DOCC):
         student_losses.update(student_loss_occ)
 
         ## Compute the distillation losses
+        if self.use_high_feat_align:
+            high_feat_align_loss = self.compute_feat_align_loss(
+                mask_camera, img_feats[0], fusion_feats[0])
+
         teacher_occ_logits = occ_pred
 
         kl_loss = self.compute_kl_loss(
@@ -553,8 +566,25 @@ class BEVFusionStereo4DOCCDistill(BEVFusionStereo4DOCC):
         losses.update(teacher_losses)
         losses.update(student_losses)
         losses['kl_loss'] = kl_loss
+
+        if self.use_high_feat_align:
+            losses.update(high_feat_align_loss)
         return losses
     
+    def compute_feat_align_loss(self, mask, student_feats, teacher_feats):
+        losses = dict()
+
+        mask1 = repeat(mask, 'b h w d -> b c d h w', 
+                       c=student_feats.shape[1])
+        mask1 = mask1.to(torch.float32)
+        num_total_samples1 = mask1.sum()
+        high_feat_loss = self.loss_high_feat(
+            student_feats, teacher_feats, 
+            mask1, avg_factor=num_total_samples1)
+        
+        losses['high_feat_loss'] = high_feat_loss
+        return losses
+
     def compute_kl_loss(self, mask, student_logits, teacher_logits, 
                         detach_target=False):
         mask = mask.to(torch.bool)

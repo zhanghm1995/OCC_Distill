@@ -2,7 +2,7 @@
 Copyright (c) 2023 by Haiming Zhang. All Rights Reserved.
 
 Author: Haiming Zhang
-Date: 2023-07-05 12:42:44
+Date: 2023-07-06 03:02:17
 Email: haimingzhang@link.cuhk.edu.cn
 Description: 
 '''
@@ -52,6 +52,7 @@ multi_adj_frame_id_cfg = (1, 1+1, 1)
 
 model = dict(
     type='BEVFusionStereo4DOCCDistill',
+    use_high_feat_align=True,
     camera_occ_head=dict(
         type='OccSimpleHead',
         use_mask=True,
@@ -59,6 +60,7 @@ model = dict(
         in_channels=32),
     align_after_view_transfromation=False,
     num_adj=len(range(*multi_adj_frame_id_cfg)),
+    
     img_backbone=dict(
         type='ResNet',
         depth=50,
