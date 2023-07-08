@@ -16,7 +16,10 @@ from mmcv.cnn.bricks.conv_module import ConvModule
 from torch import nn
 import numpy as np
 import torch.nn.functional as F
+from einops import repeat, rearrange
+
 from mmdet3d.models.losses.lovasz_loss import Lovasz_loss
+from .bevdet_occ import SE_Block
 
 
 class SSCNet(nn.Module):
@@ -202,6 +205,122 @@ class BEVStereo4DSSCOCC(BEVStereo4D):
         losses['loss_depth'] = loss_depth
 
         occ_pred = self.final_conv(img_feats[0]).permute(0, 4, 3, 2, 1)  # bncdhw->bnwhdc
+        if self.use_predicter:
+            occ_pred = self.predicter(occ_pred)
+        voxel_semantics = kwargs['voxel_semantics']
+        mask_camera = kwargs['mask_camera']
+        assert voxel_semantics.min() >= 0 and voxel_semantics.max() <= 17
+        loss_occ = self.loss_single(voxel_semantics, mask_camera, occ_pred)
+        losses.update(loss_occ)
+        return losses
+    
+
+@DETECTORS.register_module()
+class BEVFusionStereo4DSSCOCC(BEVStereo4DSSCOCC):
+
+    def __init__(self,
+                 se=True,
+                 lic=384,
+                 fuse_3d_bev=False,
+                 **kwargs):
+        super(BEVFusionStereo4DSSCOCC, self).__init__(**kwargs)
+        
+        self.fuse_3d_bev = fuse_3d_bev
+        self.se = se
+        
+        if fuse_3d_bev:
+            if se:
+                self.seblock = SE_Block(32, mode='3d')
+            self.reduc_conv = ConvModule(
+                lic + 32,
+                out_channels=32,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+                bias=True,
+                conv_cfg=dict(type='Conv3d'))
+        else:
+            if se:
+                self.seblock = SE_Block(32*16)
+            self.reduc_conv = ConvModule(
+                lic + 32*16,
+                32*16,
+                3,
+                padding=1,
+                conv_cfg=None,
+                norm_cfg=dict(type='BN', eps=1e-3, momentum=0.01),
+                act_cfg=dict(type='ReLU'),
+                inplace=False)
+
+    def extract_pts_feat(self, pts, img_feats, img_metas):
+        """Extract features of points."""
+        if not self.with_pts_backbone:
+            return None
+        voxels, num_points, coors = self.voxelize(pts)
+        voxel_features = self.pts_voxel_encoder(
+            voxels, num_points, coors)
+        batch_size = coors[-1, 0] + 1
+        x = self.pts_middle_encoder(voxel_features, coors, batch_size)
+        x = self.pts_backbone(x)
+        if self.with_pts_neck:
+            x = self.pts_neck(x)
+        return x
+    
+    def apply_lc_fusion(self, img_feats, pts_feats):
+        if self.fuse_3d_bev:
+            assert img_feats.ndim == pts_feats.ndim == 5
+
+            pts_feats = [self.reduc_conv(torch.cat([img_feats, pts_feats], dim=1))]
+            if self.se:
+                pts_feats = self.seblock(pts_feats[0])
+        else:
+            if img_feats.ndim == 5:
+                Dimz = img_feats.shape[2]
+                img_bev_feat = rearrange(img_feats, 'b c Dimz DimH DimW -> b (c Dimz) DimH DimW')
+            else:
+                img_bev_feat = img_feats
+            
+            pts_feats = [self.reduc_conv(torch.cat([img_bev_feat, pts_feats[0]], dim=1))]
+            if self.se:
+                pts_feats = self.seblock(pts_feats[0])
+            
+            if img_feats.ndim == 5:
+                pts_feats = rearrange(pts_feats, 'b (c Dimz) DimH DimW -> b c Dimz DimH DimW', Dimz=Dimz)
+        return [pts_feats]
+        
+    def extract_feat(self, points, img, img_metas, **kwargs):
+        """Extract features from images and points."""
+        img_feats, depth = self.extract_img_feat(img, img_metas, **kwargs)
+        pts_feats = self.extract_pts_feat(points, img_feats, img_metas)  # [(b,384,200,200)]
+
+        ## apply the lidar camera fusion
+        fusion_feats = self.apply_lc_fusion(img_feats[0], pts_feats)
+        return (fusion_feats, pts_feats, depth)
+
+    def forward_train(self,
+                      points=None,
+                      img_metas=None,
+                      gt_bboxes_3d=None,
+                      gt_labels_3d=None,
+                      gt_labels=None,
+                      gt_bboxes=None,
+                      img_inputs=None,
+                      proposals=None,
+                      gt_bboxes_ignore=None,
+                      **kwargs):
+        """Forward training function.
+
+        Returns:
+            dict: Losses of different branches.
+        """
+        img_feats, pts_feats, depth = self.extract_feat(
+            points, img=img_inputs, img_metas=img_metas, **kwargs)
+        gt_depth = kwargs['gt_depth']
+        losses = dict()
+        loss_depth = self.img_view_transformer.get_depth_loss(gt_depth, depth)
+        losses['loss_depth'] = loss_depth
+
+        occ_pred = self.final_conv(img_feats[0]).permute(0, 4, 3, 2, 1) # bncdhw->bnwhdc
         if self.use_predicter:
             occ_pred = self.predicter(occ_pred)
         voxel_semantics = kwargs['voxel_semantics']
