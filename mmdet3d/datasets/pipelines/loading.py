@@ -252,6 +252,7 @@ class LoadPointsFromMultiSweeps(object):
             else:
                 choices = np.random.choice(
                     len(results['sweeps']), self.sweeps_num, replace=False)
+            
             for idx in choices:
                 sweep = results['sweeps'][idx]
                 points_sweep = self._load_points(sweep['data_path'])

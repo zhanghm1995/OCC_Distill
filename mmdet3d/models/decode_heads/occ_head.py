@@ -83,6 +83,15 @@ class OccSimpleHead(BaseModule):
         return loss_
     
     def forward(self, x):
+        """The forward function. Given the input features, predict
+        the occupancy logits.
+
+        Args:
+            x (_type_): _description_
+
+        Returns:
+            _type_: _description_
+        """
         if isinstance(x, list):
             feats = x[0]
         else:
@@ -98,6 +107,7 @@ class OccSimpleHead(BaseModule):
     
     def forward_train(self, 
                       inputs, 
+                      return_logits=False,
                       **kwargs):
         """Forward function for training.
 
@@ -118,6 +128,9 @@ class OccSimpleHead(BaseModule):
         losses = dict()
         loss_occ = self.loss_single(voxel_semantics, mask, occ_logits)
         losses.update(loss_occ)
+
+        if return_logits:
+            return losses, occ_logits
         return losses
 
 
