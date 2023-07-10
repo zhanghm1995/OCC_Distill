@@ -46,9 +46,11 @@ voxel_size = [0.2, 0.2, 6.4]
 
 numC_Trans = 32
 
-multi_adj_frame_id_cfg = (1, 4+1, 1)
+multi_adj_frame_id_cfg = (1, 8+1, 1)
 
-pretrained = 'https://huggingface.co/OpenGVLab/InternImage/resolve/main/internimage_l_22k_192to384.pth'
+# pretrained = 'https://huggingface.co/OpenGVLab/InternImage/resolve/main/internimage_l_22k_192to384.pth'
+pretrained = "data/internimage_pretrained/cascade_internimage_l_fpn_3x_coco.pth"
+
 model = dict(
     type='BEVFusionStereo4DSSCOCC',
     align_after_view_transfromation=False,
@@ -252,7 +254,7 @@ test_data_config = dict(
 
 data = dict(
     samples_per_gpu=1,
-    workers_per_gpu=8,
+    workers_per_gpu=16,
     train=dict(
         data_root=data_root,
         ann_file=data_root + 'bevdetv3-nuscenes_infos_trainval.pkl',
