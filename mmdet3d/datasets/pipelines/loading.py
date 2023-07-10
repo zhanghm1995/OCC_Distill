@@ -838,7 +838,7 @@ def mmlabNormalize(img):
     from mmcv.image.photometric import imnormalize
     mean = np.array([123.675, 116.28, 103.53], dtype=np.float32)
     std = np.array([58.395, 57.12, 57.375], dtype=np.float32)
-    to_rgb = True
+    to_rgb = False
     img = imnormalize(np.array(img), mean, std, to_rgb)
     img = torch.tensor(img).float().permute(2, 0, 1).contiguous()
     return img
