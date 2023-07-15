@@ -132,6 +132,49 @@ def add_ann_adj_info(extra_tag):
             pickle.dump(dataset, fid)
 
 
+def add_ann_adj_info_v2(version, extra_tag):
+    """We use this function to create the test pickle infos.
+
+    Args:
+        version (str): Dataset version.
+        extra_tag (_type_): _description_
+    """
+    dataroot = './data/nuscenes/'
+    nuscenes = NuScenes(version, dataroot)
+    for set in ['test']:
+        dataset = pickle.load(
+            open('./data/nuscenes/%s_infos_%s.pkl' % (extra_tag, set), 'rb'))
+        for id in range(len(dataset['infos'])):
+            if id % 10 == 0:
+                print('%d/%d' % (id, len(dataset['infos'])))
+            info = dataset['infos'][id]
+            # get sweep adjacent frame info
+            sample = nuscenes.get('sample', info['token'])
+            ann_infos = list()
+            for ann in sample['anns']:
+                ann_info = nuscenes.get('sample_annotation', ann)
+                velocity = nuscenes.box_velocity(ann_info['token'])
+                if np.any(np.isnan(velocity)):
+                    velocity = np.zeros(3)
+                ann_info['velocity'] = velocity
+                ann_infos.append(ann_info)
+            dataset['infos'][id]['ann_infos'] = ann_infos
+            dataset['infos'][id]['ann_infos'] = get_gt(dataset['infos'][id])
+            dataset['infos'][id]['scene_token'] = sample['scene_token']
+
+            if 'test' not in version:
+                # get occ gt path when not test set
+                scene = nuscenes.get('scene', sample['scene_token'])
+
+                if version == 'v1.0-mini':
+                    dataset['infos'][id]['occ_path'] = \
+                        './data/nuscenes/gts-mini/%s/%s'%(scene['name'], info['token'])
+
+        with open('./data/nuscenes/%s_infos_%s.pkl' % (extra_tag, set),
+                  'wb') as fid:
+            pickle.dump(dataset, fid)
+
+
 if __name__ == '__main__':
     dataset = 'nuscenes'
     version = 'v1.0'
@@ -146,3 +189,26 @@ if __name__ == '__main__':
 
     print('add_ann_infos')
     add_ann_adj_info(extra_tag)
+
+    # create mini infos
+    # train_version = 'v1.0-mini'
+    # extra_tag = 'bevdetv3-nuscenes-mini'
+    # nuscenes_data_prep(
+    #     root_path=root_path,
+    #     info_prefix=extra_tag,
+    #     version=train_version,
+    #     max_sweeps=10)
+
+    # print('add mini ann infos')
+    # add_ann_adj_info(extra_tag)
+
+    # add test infos
+    test_version = f'{version}-test'
+    nuscenes_data_prep(
+        root_path=root_path,
+        info_prefix=extra_tag,
+        version=test_version,
+        max_sweeps=10)
+
+    print('add_ann_infos')
+    add_ann_adj_info_v2(test_version, extra_tag)
