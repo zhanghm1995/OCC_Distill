@@ -108,12 +108,12 @@ class OccSimpleHead(BaseModule):
     def forward_train(self, 
                       inputs, 
                       return_logits=False,
+                      use_binary_occupacy=False,
                       **kwargs):
         """Forward function for training.
 
         Args:
             inputs (list[torch.Tensor]): List of multi-level point features.
-            img_metas (list[dict]): Meta information of each sample.
             voxel_semantics (torch.Tensor): The GT semantic voxesl.
             train_cfg (dict): The training config.
 
@@ -124,6 +124,10 @@ class OccSimpleHead(BaseModule):
         
         mask = kwargs[self.mask_key] if self.use_mask else None
         voxel_semantics = kwargs['voxel_semantics']
+
+        if use_binary_occupacy:
+            ## Here we change the voxel_semantics to binary occupancy predictions
+            voxel_semantics = (voxel_semantics < 17).float()
 
         losses = dict()
         loss_occ = self.loss_single(voxel_semantics, mask, occ_logits)

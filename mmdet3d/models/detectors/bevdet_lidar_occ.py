@@ -222,6 +222,7 @@ class LidarOCC(CenterPoint):
     def __init__(self, 
                  occ_head=None,
                  use_free_occ_token=False,
+                 use_binary_occupacy=False,
                  **kwargs):
         super(LidarOCC, self).__init__(**kwargs)
         
@@ -258,6 +259,7 @@ class LidarOCC(CenterPoint):
             pts_feats = free_voxels * self.free_occ_token + (1 - free_voxels) * pts_feats
 
         loss_occ = self.occ_head.forward_train(pts_feats, 
+                                               use_binary_occupacy=self.use_binary_occupacy,
                                                **kwargs)
         return loss_occ
     
