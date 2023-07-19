@@ -2,32 +2,10 @@
 Copyright (c) 2023 by Haiming Zhang. All Rights Reserved.
 
 Author: Haiming Zhang
-Date: 2023-07-16 15:22:07
+Date: 2023-07-19 14:30:40
 Email: haimingzhang@link.cuhk.edu.cn
-Description: 
+Description: Vanilla bevdet-occ with pretrained ResNet-50 and finetune all.
 '''
-# Copyright (c) Phigent Robotics. All rights reserved.
-
-# align_after_view_transfromation=False
-# ===> per class IoU of 6019 samples:
-# ===> others - IoU = 8.22
-# ===> barrier - IoU = 44.21
-# ===> bicycle - IoU = 10.34
-# ===> bus - IoU = 42.08
-# ===> car - IoU = 49.63
-# ===> construction_vehicle - IoU = 23.37
-# ===> motorcycle - IoU = 17.41
-# ===> pedestrian - IoU = 21.49
-# ===> traffic_cone - IoU = 19.7
-# ===> trailer - IoU = 31.33
-# ===> truck - IoU = 37.09
-# ===> driveable_surface - IoU = 80.13
-# ===> other_flat - IoU = 37.37
-# ===> sidewalk - IoU = 50.41
-# ===> terrain - IoU = 54.29
-# ===> manmade - IoU = 45.56
-# ===> vegetation - IoU = 39.59
-# ===> mIoU of 6019 samples: 36.01
 
 
 _base_ = ['../_base_/datasets/nus-3d.py', '../_base_/default_runtime.py']
@@ -75,6 +53,7 @@ model = dict(
     align_after_view_transfromation=False,
     num_adj=len(range(*multi_adj_frame_id_cfg)),
     img_backbone=dict(
+        pretrained='torchvision://resnet50',
         type='ResNet',
         depth=50,
         num_stages=4,
@@ -220,7 +199,7 @@ data = dict(
     workers_per_gpu=4,
     train=dict(
         data_root=data_root,
-        ann_file=data_root + 'bevdetv2-nuscenes_infos_train.pkl',
+        ann_file=data_root + 'quarter-bevdetv3-nuscenes_infos_train.pkl',
         pipeline=train_pipeline,
         classes=class_names,
         test_mode=False,
@@ -238,7 +217,6 @@ for key in ['val', 'train', 'test']:
 optimizer = dict(type='AdamW', lr=1e-4, weight_decay=1e-2)
 optimizer_config = dict(grad_clip=dict(max_norm=5, norm_type=2))
 
-## zhm: the original lr_config is as follows:
 lr_config = dict(
     policy='step',
     warmup='linear',
@@ -254,7 +232,3 @@ custom_hooks = [
         priority='NORMAL',
     ),
 ]
-
-# load_from="work_dirs/pretrain-bevdet-occ-r50-4d-stereo-24e/epoch_24.pth"
-load_from="pretrain-bevdet-occ-r50-4d-stereo-wo-head-24e.pth"
-# fp16 = dict(loss_scale='dynamic')
