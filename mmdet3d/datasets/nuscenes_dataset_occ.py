@@ -106,3 +106,14 @@ class NuScenesDatasetOccpancy(NuScenesDataset):
         occ_bev_vis = occ_bev_vis.reshape(200, 200, 4)[::-1, ::-1, :3]
         occ_bev_vis = cv2.resize(occ_bev_vis,(400,400))
         return occ_bev_vis
+    
+    def format_results(self, occ_results, submission_prefix, **kwargs):
+        if submission_prefix is not None:
+            mmcv.mkdir_or_exist(submission_prefix)
+
+        for index, occ_pred in enumerate(tqdm(occ_results)):
+            info = self.data_infos[index]
+            sample_token = info['token']
+            save_path = os.path.join(submission_prefix, '{}.npz'.format(sample_token))
+            np.savez_compressed(save_path, occ_pred.astype(np.uint8))
+        print('\nFinished.')
