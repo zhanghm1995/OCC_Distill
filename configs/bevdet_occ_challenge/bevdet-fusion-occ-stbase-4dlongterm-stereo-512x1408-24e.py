@@ -2,7 +2,6 @@
 
 
 _base_ = ['../_base_/datasets/nus-3d.py', '../_base_/default_runtime.py']
-# Global
 # For nuScenes we usually do 10-class detection
 class_names = [
     'car', 'truck', 'construction_vehicle', 'bus', 'trailer', 'barrier',
@@ -16,7 +15,7 @@ data_config = {
     ],
     'Ncams':
     6,
-    'input_size': (256, 704),
+    'input_size': (512, 1408),
     'src_size': (900, 1600),
 
     # Augmentation
@@ -40,7 +39,7 @@ voxel_size = [0.2, 0.2, 6.4]
 
 numC_Trans = 32
 
-multi_adj_frame_id_cfg = (1, 1+1, 1)
+multi_adj_frame_id_cfg = (1, 6+1, 1)
 
 model = dict(
     type='BEVFusionStereo4DSSCOCC',
@@ -240,11 +239,11 @@ test_data_config = dict(
     ann_file=data_root + 'bevdetv2-nuscenes_infos_val.pkl')
 
 data = dict(
-    samples_per_gpu=4,
+    samples_per_gpu=3,
     workers_per_gpu=8,
     train=dict(
         data_root=data_root,
-        ann_file=data_root + 'bevdetv2-nuscenes_infos_trainval.pkl',
+        ann_file=data_root + 'bevdetv2-nuscenes_infos_trainval-yx.pkl',
         pipeline=train_pipeline,
         classes=class_names,
         test_mode=False,
@@ -282,5 +281,5 @@ custom_hooks = [
     ),
 ]
 
-load_from = "exps/pretrained_models/bevdet-stbase-4d-stereo-512x1408-cbgs.pth"
+load_from = "exps/bevdet-dev2.1/bevdet-stbase-4d-stereo-512x1408-cbgs.pth"
 # fp16 = dict(loss_scale='dynamic')
