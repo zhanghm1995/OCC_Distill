@@ -101,6 +101,19 @@ def remove_state_dict_keys(state_dict, keys):
             new_state_dict[k] = v
     return new_state_dict
 
+def remove_state_dict_key_prefix(state_dict, prefix):
+    new_state_dict = OrderedDict()
+    for k, v in state_dict.items():
+        flag = False
+        for kk in keys:
+            if k.startswith(kk):
+                flag = True
+                break
+        
+        if not flag:
+            new_state_dict[k] = v
+    return new_state_dict
+
 
 def main_merge_student_teacher_models(stu_filename,
                                       tea_filename,
@@ -137,6 +150,22 @@ def main_append_model_prefix(filename, prefix, save_path):
 
 
 if __name__ == "__main__":
+    file_path = "bevdet-r50-as-student_lidar-occ-voxel-ms-new-as-teacher-model.pth"
+    pretraining_model = torch.load(file_path, map_location="cpu")
+
+    keys_remove = ['student_model.']
+    new_state_dict = remove_state_dict_keys(pretraining_model['state_dict'], keys_remove)
+
+    keys_mapping = {
+        "teacher_model.": ""
+    }
+    new_state_dict = update_state_dict_keys(
+        new_state_dict,
+        keys_mapping)
+    pretraining_model['state_dict'] = new_state_dict
+    torch.save(pretraining_model, "lidar_occ_voxel_ms_new.pth")
+
+    exit(0)
     file_path = "work_dirs/pretrain-bevdet-occ-r50-4d-stereo-24e/epoch_24.pth"
     pretraining_model = torch.load(file_path, map_location="cpu")
     keys_remove = ['final_conv', 'predicter']
