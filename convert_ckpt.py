@@ -136,7 +136,34 @@ def main_append_model_prefix(filename, prefix, save_path):
     torch.save(checkpoint, save_path)
 
 
+def merge_student_teacher_model(student_file_name,
+                                teacher_file_name,
+                                save_path):
+    stu_model = torch.load(student_file_name, map_location="cpu")
+    tea_model = torch.load(teacher_file_name, map_location="cpu")
+
+    ## 1) remapping the keys of the teacher model
+    keys_mapping = {
+        'pts_bev_encoder_backbone': 'pts_backbone',
+        'pts_bev_encoder_neck': 'pts_neck',
+    }
+    teacher_state_dict = update_state_dict_keys(tea_model['state_dict'],
+                                                keys_mapping=keys_mapping)
+    ## 2) append the prefix of the teacher model
+    teacher_state_dict = append_prefix(teacher_state_dict, prefix="teacher_model.")
+
+    ## 3) merge the student and teacher model
+    new_state_dict = merge_state_dict([teacher_state_dict, stu_model['state_dict']])
+    tea_model['state_dict'] = new_state_dict
+    
+    torch.save(tea_model, save_path)
+    
 if __name__ == "__main__":
+    student_fp = "bevdet-r50-4d-stereo-cbgs-as-student-model.pth"
+    teacher_fp = "tools/work_dirs/lidar_only/lidar-occ-ms-voxel-w-aug/epoch_24_ema.pth"
+    save_path = "bevdet-r50-4d-stereo-as-student-lidar-voxel-ms-w-aug-new-as-teacher.pth"
+    merge_student_teacher_model(student_fp, teacher_fp, save_path)
+    exit(0)
     file_path = "bevdet-r50-as-student_lidar-occ-voxel-ms-new-as-teacher-model.pth"
     pretraining_model = torch.load(file_path, map_location="cpu")
 
