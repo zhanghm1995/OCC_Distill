@@ -410,6 +410,7 @@ class LidarOCC(CenterPoint):
                 torch.randn(1, 32, 1, 1, 1))
         
         self.use_free_occ_token = use_free_occ_token
+        self.use_binary_occupacy = use_binary_occupacy
 
     @property
     def with_occ_head(self):

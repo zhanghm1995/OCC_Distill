@@ -180,6 +180,33 @@ if __name__ == "__main__":
     torch.save(pretraining_model, "bevdet-r50-as-student-lidar_occ_voxel_ms_new.pth")
 
     exit(0)
+    ckpt_path = "bevdet-lidar-occ-voxel-multi-sweeps-24e_teacher_model_new.pth"
+    teacher_checkpoint_ = torch.load(ckpt_path, map_location="cpu")
+
+    ckpt_path = "bevdet-r50-4d-stereo-cbgs-as-student-model.pth"
+    student_checkpoint_ = torch.load(ckpt_path, map_location="cpu")
+    
+    new_state_dict = merge_state_dict([teacher_checkpoint_['state_dict'], 
+                                       student_checkpoint_['state_dict']])
+    teacher_checkpoint_['state_dict'] = new_state_dict
+
+    save_path = "bevdet-r50-as-student_lidar-occ-voxel-ms-new-as-teacher-model.pth"
+    torch.save(teacher_checkpoint_, save_path)
+    exit(0)
+    ckpt_path = "bevdet-lidar-occ-voxel-multi-sweeps-24e_teacher_model.pth"
+    checkpoint_ = torch.load(ckpt_path, map_location="cpu")
+
+    keys_mapping = {
+        'teacher_model.pts_bev_encoder_backbone': 'teacher_model.pts_backbone',
+        'teacher_model.pts_bev_encoder_neck': 'teacher_model.pts_neck'
+    }
+    new_state_dict = update_state_dict_keys(
+        checkpoint_['state_dict'],
+        keys_mapping=keys_mapping)
+    checkpoint_['state_dict'] = new_state_dict
+    torch.save(checkpoint_, "bevdet-lidar-occ-voxel-multi-sweeps-24e_teacher_model_new.pth")
+    exit(0)
+
     file_path = "work_dirs/pretrain-bevdet-occ-r50-4d-stereo-24e/epoch_24.pth"
     pretraining_model = torch.load(file_path, map_location="cpu")
     keys_remove = ['final_conv', 'predicter']
