@@ -180,7 +180,7 @@ if __name__ == '__main__':
     version = 'v1.0'
     train_version = f'{version}-trainval'
     root_path = './data/nuscenes'
-    extra_tag = 'bevdetv3-nuscenes'
+    extra_tag = 'bevdetv3-lidarseg-nuscenes'
     nuscenes_data_prep(
         root_path=root_path,
         info_prefix=extra_tag,
@@ -202,13 +202,13 @@ if __name__ == '__main__':
     # print('add mini ann infos')
     # add_ann_adj_info(extra_tag)
 
-    # add test infos
-    test_version = f'{version}-test'
-    nuscenes_data_prep(
-        root_path=root_path,
-        info_prefix=extra_tag,
-        version=test_version,
-        max_sweeps=10)
+    ### add test infos
+    # test_version = f'{version}-test'
+    # nuscenes_data_prep(
+    #     root_path=root_path,
+    #     info_prefix=extra_tag,
+    #     version=test_version,
+    #     max_sweeps=10)
 
-    print('add_ann_infos')
-    add_ann_adj_info_v2(test_version, extra_tag)
+    # print('add_ann_infos')
+    # add_ann_adj_info_v2(test_version, extra_tag)

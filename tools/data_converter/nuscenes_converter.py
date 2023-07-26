@@ -186,6 +186,11 @@ def _fill_trainval_infos(nusc,
             'timestamp': sample['timestamp'],
         }
 
+        if 'lidarseg' in nusc.table_names:
+            lidarseg_label = os.path.join(nusc.dataroot, 
+                                          nusc.get('lidarseg', lidar_token)['filename'])
+            info['lidarseg'] = lidarseg_label
+
         l2e_r = info['lidar2ego_rotation']
         l2e_t = info['lidar2ego_translation']
         e2g_r = info['ego2global_rotation']
