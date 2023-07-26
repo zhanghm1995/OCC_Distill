@@ -427,7 +427,7 @@ class NeRFDecoderHead(nn.Module):
             render: num_camera, H, W
         '''
         import matplotlib.pyplot as plt
-        from NeRF.turbo_cmap import turbo_colormap_data, normalize_depth, interpolate_or_clip
+        from mmdet3d.utils import turbo_colormap_data, normalize_depth, interpolate_or_clip
 
         concated_render_list = []
         concated_image_list = []
@@ -462,8 +462,8 @@ class NeRFDecoderHead(nn.Module):
                 ax[i, j].axis('off')
 
         plt.subplots_adjust(wspace=0.01, hspace=0.01)
-        plt.show()
-        # plt.savefig("liar_debug.png")
+        # plt.show()
+        plt.savefig("bevdet_occ_nerf_debug.png")
 
 
 if __name__ == '__main__':
