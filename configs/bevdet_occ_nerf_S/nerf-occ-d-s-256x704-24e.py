@@ -2,7 +2,7 @@
 Copyright (c) 2023 by Haiming Zhang. All Rights Reserved.
 
 Author: Haiming Zhang
-Date: 2023-07-25 20:19:29
+Date: 2023-07-27 09:12:43
 Email: haimingzhang@link.cuhk.edu.cn
 Description: 
 '''
@@ -21,11 +21,11 @@ data_config = {
     ],
     'Ncams':
         6,
-    'input_size': (384, 704),
+    'input_size': (256, 704),
     # 'input_size': (224, 352), # SMALL FOR DEBUG
     'src_size': (900, 1600),
     # 'render_size': (90, 160), # SMALL FOR DEBUG
-    'render_size': (384, 704),
+    'render_size': (256, 704),
 
     # Augmentation
     'resize': (-0.06, 0.11),
@@ -245,15 +245,22 @@ for key in ['val', 'train', 'test']:
 # Optimizer
 optimizer = dict(type='AdamW', lr=1e-4, weight_decay=1e-2)
 optimizer_config = dict(grad_clip=dict(max_norm=5, norm_type=2))
+# lr_config = dict(
+#     policy='CosineAnnealing',
+#     warmup='linear',
+#     warmup_iters=500,
+#     warmup_ratio=1.0 / 3,
+#     min_lr_ratio=1e-3)
 lr_config = dict(
-    policy='CosineAnnealing',
+    policy='step',
     warmup='linear',
-    warmup_iters=500,
-    warmup_ratio=1.0 / 3,
-    min_lr_ratio=1e-3)
+    warmup_iters=200,
+    warmup_ratio=0.001,
+    step=[100,])
 runner = dict(type='EpochBasedRunner', max_epochs=24)
 evaluation = dict(interval=24, pipeline=test_pipeline)
-checkpoint_config = dict(interval=1)
+
+checkpoint_config = dict(interval=1, max_keep_ckpts=10)
 
 custom_hooks = [
     dict(

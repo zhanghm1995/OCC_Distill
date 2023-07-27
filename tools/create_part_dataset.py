@@ -15,9 +15,7 @@ import os.path as osp
 import mmcv
 
 
-def load_mmdetection3d_infos():
-    nuscenes_info_pickle = "/home/zhanghm/Research/Occupancy/BEVDet/data/nuscenes/bevdetv3-nuscenes_infos_train.pkl"
-
+def load_mmdetection3d_infos(nuscenes_info_pickle):
     with open(nuscenes_info_pickle, "rb") as fp:
         nuscenes_infos = pickle.load(fp)
 
@@ -27,9 +25,11 @@ def load_mmdetection3d_infos():
     return nuscenes_infos
 
 
-def create_part_pickle(input, ratio=0.5):
-    metadata = input['metadata']
-    infos = input['infos']
+def create_part_pickle(pickle_path, ratio=0.5):
+    nuscenes_infos = load_mmdetection3d_infos(pickle_path)
+
+    metadata = nuscenes_infos['metadata']
+    infos = nuscenes_infos['infos']
 
     scenes_dict = defaultdict(list)
 
@@ -65,9 +65,12 @@ def create_part_pickle(input, ratio=0.5):
 
     print(len(new_infos))
     data = dict(infos=new_infos, metadata=metadata)
+
+    filename, ext = osp.splitext(osp.basename(pickle_path))
     root_path = "./data/nuscenes"
-    filename = "quarter-bevdetv3-nuscenes_infos_train.pkl"
-    info_path = osp.join(root_path, filename)
+    new_filename = f"{filename}-quarter{ext}"
+    info_path = osp.join(root_path, new_filename)
+    print(f"The results would be saved into {info_path}")
     mmcv.dump(data, info_path)
     
 
@@ -86,6 +89,5 @@ def create_part_pickle(input, ratio=0.5):
 
 
 if __name__ == "__main__":
-    data_infos = load_mmdetection3d_infos()
-    
-    create_part_pickle(data_infos, ratio=0.25)
+    nuscenes_info_pickle = "data/nuscenes/bevdetv3-lidarseg-nuscenes_infos_train.pkl"
+    create_part_pickle(nuscenes_info_pickle, ratio=0.25)
