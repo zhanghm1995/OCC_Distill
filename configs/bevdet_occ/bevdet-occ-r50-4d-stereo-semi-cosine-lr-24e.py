@@ -1,3 +1,11 @@
+'''
+Copyright (c) 2023 by Haiming Zhang. All Rights Reserved.
+
+Author: Haiming Zhang
+Date: 2023-07-28 17:41:55
+Email: haimingzhang@link.cuhk.edu.cn
+Description: 
+'''
 # Copyright (c) Phigent Robotics. All rights reserved.
 
 # align_after_view_transfromation=False
@@ -231,11 +239,11 @@ optimizer = dict(type='AdamW', lr=1e-4, weight_decay=1e-2)
 optimizer_config = dict(grad_clip=dict(max_norm=5, norm_type=2))
 
 lr_config = dict(
-    policy='step',
+    policy='CosineAnnealing',
     warmup='linear',
-    warmup_iters=200,
-    warmup_ratio=0.001,
-    step=[100,])
+    warmup_iters=500,
+    warmup_ratio=1.0 / 3,
+    min_lr_ratio=1e-3)
 runner = dict(type='EpochBasedRunner', max_epochs=24)
 
 custom_hooks = [
