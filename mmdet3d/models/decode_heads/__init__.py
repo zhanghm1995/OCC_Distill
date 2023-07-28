@@ -4,8 +4,8 @@ from .paconv_head import PAConvHead
 from .pointnet2_head import PointNet2Head
 from .occ_head import OccDistillHead
 from .nerf_head import NeRFDecoderHead
-from .nerf_distill_head import NeRFOccDistillHead
+from .nerf_distill_head import NeRFOccDistillHead, NeRFOccDistillSimpleHead
 
 __all__ = ['PointNet2Head', 'DGCNNHead', 'PAConvHead',
            'OccDistillHead', 'NeRFDecoderHead',
-           'NeRFOccDistillHead']
+           'NeRFOccDistillHead', 'NeRFOccDistillSimpleHead']

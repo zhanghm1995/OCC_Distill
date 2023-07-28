@@ -9,25 +9,9 @@ Description:
 
 
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import numpy as np
-import cv2
-from torch_scatter import scatter_mean
-from mmdet3d.models.builder import HEADS
-
-'''
-Copyright (c) 2023 by Haiming Zhang. All Rights Reserved.
-
-Author: Haiming Zhang
-Date: 2023-07-20 19:47:30
-Email: haimingzhang@link.cuhk.edu.cn
-Description: 
-'''
-
-import torch
 from torch import nn
 import torch.nn.functional as F
+from torch_scatter import scatter_mean
 from typing import Dict
 from einops import rearrange, repeat
 from mmcv.runner import BaseModule
