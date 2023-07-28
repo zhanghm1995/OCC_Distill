@@ -218,7 +218,7 @@ class BEVLidarOCC(CenterPoint):
 
 
 @DETECTORS.register_module()
-class MyBEVLidarOCCNeRF(CenterPoint):
+class BEVLidarOCCV2(CenterPoint):
     """
 
     Args:
@@ -234,7 +234,7 @@ class MyBEVLidarOCCNeRF(CenterPoint):
                  use_predicter=True, 
                  refine_conv=False,
                  **kwargs):
-        super(MyBEVLidarOCCNeRF, self).__init__(**kwargs)
+        super(BEVLidarOCCV2, self).__init__(**kwargs)
         
         self.out_dim = out_dim
         out_channels = out_dim if use_predicter else num_classes
