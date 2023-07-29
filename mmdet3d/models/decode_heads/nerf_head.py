@@ -463,7 +463,56 @@ class NeRFDecoderHead(nn.Module):
 
         plt.subplots_adjust(wspace=0.01, hspace=0.01)
         # plt.show()
-        plt.savefig("bevdet_occ_nerf_debug.png")
+        plt.savefig("lidar_occ_nerf_infer_debug.png")
+
+    def visualize_image_and_render_depth_pair(self, images, render_gt, render):
+        '''
+        This is a debug function!!
+        Args:
+            images: num_camera, 3, H, W
+            render_gt: num_camera, H, W
+            render: num_camera, H, W
+        '''
+        import matplotlib.pyplot as plt
+
+        concated_render_list = []
+        concated_render_gt_list= []
+        concated_image_list = []
+        
+        depth = render_gt
+        depth = depth.cpu().numpy()
+        render = render.cpu().numpy()
+        render_gt = render_gt.cpu().numpy()
+
+        for b in range(len(images)):
+            visual_img = cv2.resize(images[b].transpose((1, 2, 0)), (depth.shape[-1], depth.shape[-2]))
+            img_mean = np.array([0.485, 0.456, 0.406])[None, None, :]
+            img_std = np.array([0.229, 0.224, 0.225])[None, None, :]
+            visual_img = np.ascontiguousarray((visual_img * img_std + img_mean))
+
+            concated_image_list.append(visual_img)
+            pred_depth_color = visualize_depth(render[b])
+            pred_depth_color = pred_depth_color[..., [2, 1, 0]]
+            concated_render_list.append(cv2.resize(pred_depth_color.copy(), (depth.shape[-1], depth.shape[-2])))
+
+            pred_depth_color = visualize_depth(render_gt[b])
+            pred_depth_color = pred_depth_color[..., [2, 1, 0]]
+            concated_render_gt_list.append(cv2.resize(pred_depth_color.copy(), (depth.shape[-1], depth.shape[-2])))
+
+        fig, ax = plt.subplots(nrows=6, ncols=3, figsize=(6, 6))
+        ij = [[i, j] for i in range(2) for j in range(3)]
+        for i in range(len(ij)):
+            ax[ij[i][0], ij[i][1]].imshow(concated_image_list[i])
+            ax[ij[i][0] + 2, ij[i][1]].imshow(np.ones_like(concated_render_list[i]) * 255)
+            ax[ij[i][0] + 2, ij[i][1]].imshow(concated_render_gt_list[i])
+            ax[ij[i][0] + 4, ij[i][1]].imshow(concated_render_list[i])
+
+            for j in range(3):
+                ax[i, j].axis('off')
+
+        plt.subplots_adjust(wspace=0.01, hspace=0.01)
+        # plt.show()
+        plt.savefig("lidar_occ_nerf_render_infer_error.png")
 
 
 if __name__ == '__main__':
