@@ -221,7 +221,7 @@ bda_aug_conf = dict(
 
 train_pipeline = [
     dict(
-        type='PrepareImageInputs',
+        type='PrepareImageInputsForNeRF',
         is_train=True,
         data_config=data_config,
         sequential=True),
@@ -244,7 +244,7 @@ train_pipeline = [
         use_dim=[0, 1, 2, 3, 4],
         file_client_args=file_client_args,
         remove_close=True),
-    dict(type='PointToMultiViewDepth', downsample=1, grid_config=grid_config, 
+    dict(type='PointToMultiViewDepthForNeRF', downsample=1, grid_config=grid_config, 
          render_size=data_config['render_size'],
          render_scale=[data_config['render_size'][0]/data_config['src_size'][0], 
                        data_config['render_size'][1]/data_config['src_size'][1]]),
@@ -264,7 +264,7 @@ train_pipeline = [
 
 test_pipeline = [
     dict(
-        type='PrepareImageInputs',
+        type='PrepareImageInputsForNeRF',
         data_config=data_config,
         sequential=True),
     dict(
@@ -328,7 +328,7 @@ data = dict(
     workers_per_gpu=8,
     train=dict(
         data_root=data_root,
-        ann_file=data_root + 'quarter-bevdetv3-lidarseg-nuscenes_infos_train.pkl',
+        ann_file=data_root + 'bevdetv3-lidarseg-nuscenes-semi_infos_train.pkl',
         pipeline=train_pipeline,
         classes=class_names,
         test_mode=False,

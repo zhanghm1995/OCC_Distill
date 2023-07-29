@@ -41,7 +41,7 @@ class MyBEVLidarOCCNeRF(CenterPoint):
         self.out_dim = out_dim
         out_channels = out_dim if use_predicter else num_classes
 
-        self.num_frame = 1
+        self.num_frame = 3
         ## NeRF related
         self.NeRFDecoder = builder.build_backbone(nerf_head)
         self.num_classes = num_classes
@@ -140,7 +140,7 @@ class MyBEVLidarOCCNeRF(CenterPoint):
         # NeRF loss
         if False:  # DEBUG ONLY!
             density_prob = kwargs['voxel_semantics'].unsqueeze(1)
-            print(density_prob.unique(), "===========")
+            print("dendensity_prob.unique():", density_prob.unique())
             # img_semantic = kwargs['img_semantic']
             density_prob = density_prob != 17
             density_prob = density_prob.float()
@@ -160,9 +160,17 @@ class MyBEVLidarOCCNeRF(CenterPoint):
             print('density_prob', density_prob.shape)  # [1, 1, 200, 200, 16]
             print('render_depth', render_depth.shape, render_depth.max(), render_depth.min())  # [1, 6, 224, 352]
             print('gt_depth', gt_depth.shape, gt_depth.max(), gt_depth.min())  # [1, 6, 384, 704]
-            current_frame_img = render_img_gt.view(batch_size, 6, self.num_frame, -1, render_img_gt.shape[-2], render_img_gt.shape[-1])[0, :, 0].cpu().numpy()
+            # get the current_frame_img with (6, 3, H, W) shape
+            current_frame_img = render_img_gt.view(batch_size, 
+                                                   6, 
+                                                   self.num_frame, 
+                                                   -1, 
+                                                   render_img_gt.shape[-2], 
+                                                   render_img_gt.shape[-1])[0, :, 0].cpu().numpy()
             print(current_frame_img.shape)
-            self.NeRFDecoder.visualize_image_depth_pair(current_frame_img, render_gt_depth[0], render_depth[0])
+            self.NeRFDecoder.visualize_image_depth_pair(current_frame_img, 
+                                                        render_gt_depth[0], 
+                                                        render_depth[0])
             exit()
 
         else:
@@ -298,6 +306,26 @@ class MyBEVLidarOCCNeRF(CenterPoint):
                     losses['loss_nerf_img'] = loss_nerf_img
         return losses
     
+    def vis_voxels_rendering(self, 
+                             occ_voxel_semantics, 
+                             intricics, 
+                             pose_spatial):
+        density_prob = occ_voxel_semantics.clone()
+        density_prob = density_prob != 17
+        density_prob = density_prob.float()
+        density_prob[density_prob == 0] = -10  # scaling to avoid 0 in alphas
+        density_prob[density_prob == 1] = 10
+        density_prob_flip = self.inverse_flip_aug(density_prob, [False], [False])
+        print('density_prob', density_prob.shape)  # [1, 1, 200, 200, 16]
+
+        # nerf decoder
+        render_depth, _, _ = self.NeRFDecoder(
+            density_prob_flip,
+            density_prob_flip.tile(1, 3, 1, 1, 1),
+            density_prob_flip.tile(1, self.NeRFDecoder.semantic_dim, 1, 1, 1),
+            intricics, pose_spatial, True)
+        return render_depth
+        
     def simple_test(self,
                     points,
                     img_metas,
@@ -316,6 +344,45 @@ class MyBEVLidarOCCNeRF(CenterPoint):
         occ_score = occ_pred.softmax(-1)
         occ_res = occ_score.argmax(-1)
         occ_res = occ_res.squeeze(dim=0).cpu().numpy().astype(np.uint8)
+
+        ## NOTE: for debug only!!
+        visualize_only = False
+        if visualize_only:
+            intricics = kwargs['intricics'][0]
+            pose_spatial = kwargs['pose_spatial'][0]
+            render_img_gt = kwargs['render_gt_img'][0]
+            render_gt_depth = kwargs['render_gt_depth'][0]
+
+            voxel_semantics = torch.from_numpy(occ_res).to(intricics.device)
+            density_prob = voxel_semantics.unsqueeze(0).unsqueeze(0)  # to (1, 1, 200, 200, 16)
+            batch_size = density_prob.shape[0]
+            
+            # neural rendering
+            render_depth = self.vis_voxels_rendering(
+                density_prob, intricics, pose_spatial)
+            print('render_depth', render_depth.shape, 
+                  render_depth.max(), render_depth.min())  # [1, 6, 224, 352]
+
+            # neural rendering the ground truth
+            occ_voxels_gt = kwargs['voxel_semantics'][0].unsqueeze(1)
+            occ_gt_render_depth = self.vis_voxels_rendering(
+                occ_voxels_gt, intricics, pose_spatial)
+            print('occ_gt_render_depth', occ_gt_render_depth.shape, 
+                  occ_gt_render_depth.max(), occ_gt_render_depth.min())
+            
+            # get the current_frame_img with (6, 3, H, W) shape
+            current_frame_img = render_img_gt.view(batch_size, 
+                                                   6, 
+                                                   self.num_frame, 
+                                                   -1, 
+                                                   render_img_gt.shape[-2], 
+                                                   render_img_gt.shape[-1])[0, :, 0].cpu().numpy()
+            print(current_frame_img.shape)
+            self.NeRFDecoder.visualize_image_and_render_depth_pair(
+                current_frame_img, 
+                occ_gt_render_depth[0], 
+                render_depth[0])
+            exit()
         return [occ_res]
     
     @staticmethod

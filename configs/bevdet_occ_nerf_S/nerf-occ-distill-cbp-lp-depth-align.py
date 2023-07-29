@@ -277,7 +277,7 @@ test_pipeline = [
         use_dim=5,
         file_client_args=file_client_args),
     dict(
-        type='PointToMultiViewDepthForNeRF',
+        type='LoadPointsFromMultiSweeps',
         sweeps_num=10,
         use_dim=[0, 1, 2, 3, 4],
         file_client_args=file_client_args,
