@@ -81,17 +81,19 @@ class NeRFOccDistillSimpleHead(BaseModule):
 
         return loss_weight * loss
     
-    def compute_semantic_loss_flatten(self, sem_est, sem_gt, 
-                                      loss_weight=1.0, lovasz=False):
+    def compute_semantic_loss_flatten(self, 
+                                      sem_est, 
+                                      sem_gt, 
+                                      loss_weight=1.0):
         '''
         Args:
             sem_est: N, C
-            sem_gt: N
+            sem_gt: N, C
         '''
-        loss = F.cross_entropy(sem_est, sem_gt.long(), ignore_index=255)
-        if lovasz:
-            loss += lovasz_softmax(sem_est, sem_gt.long(), ignore=255)
-        return loss_weight * loss
+        kl_loss = F.kl_div(
+            F.log_softmax(sem_est, dim=1),
+            F.softmax(sem_gt.detach(), dim=1))
+        return loss_weight * kl_loss
     
     def loss(self, 
              student_feats: Dict,
