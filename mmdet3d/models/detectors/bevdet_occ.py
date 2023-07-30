@@ -11,7 +11,22 @@ from torch import nn
 import numpy as np
 from torch.nn import functional as F
 from einops import repeat, rearrange
+from mmdet.core import multi_apply
+
 from .. import builder
+
+
+def merge_aug_occs(aug_occ_list):
+    """Merge the augmented testing occupacy prediction results
+
+    Args:
+        aug_occ_list (List): each element with shape (200, 200, 16, 18)
+    """
+    merged_occs = torch.stack(aug_occ_list, dim=-1)  # to (200, 200, 16, 18, L)
+    merged_occs = torch.mean(merged_occs, dim=-1)  # to (200, 200, 16, 18)
+    occ_res = merged_occs.argmax(-1)
+    occ_res = occ_res.squeeze(dim=0).cpu().numpy().astype(np.uint8)
+    return occ_res
 
 
 @DETECTORS.register_module()
@@ -302,6 +317,11 @@ class SE_Block(nn.Module):
 
 @DETECTORS.register_module()
 class BEVFusionStereo4DOCC(BEVStereo4DOCC):
+    """Fuse the lidar and camera images for occupancy prediction.
+
+    Args:
+        BEVStereo4DOCC (_type_): _description_
+    """
 
     def __init__(self,
                  se=True,
@@ -419,6 +439,46 @@ class BEVFusionStereo4DOCC(BEVStereo4DOCC):
         occ_res=occ_score.argmax(-1)
         occ_res = occ_res.squeeze(dim=0).cpu().numpy().astype(np.uint8)
         return [occ_res]
+    
+    def aug_test(self, 
+                 points,
+                 img_metas,
+                 img=None,
+                 rescale=False,
+                 **kwargs):
+        """Test function with augmentaiton."""
+        img_feats, pts_feats, _ = multi_apply(self.extract_feat, 
+                                              points, 
+                                              img,
+                                              img_metas, 
+                                              **kwargs)
+        
+        img_feats, _, _ = self.extract_feat(
+            points, img=img, img_metas=img_metas, **kwargs)
+        occ_pred = self.final_conv(img_feats[0]).permute(0, 4, 3, 2, 1)
+        if self.use_predicter:
+            occ_pred = self.predicter(occ_pred)
+        
+        ## NOTE: here we assume only use the flip augmentation
+        occ_res = self.aug_test_imgs(img_feats, img_metas, rescale)
+        return [occ_res]
+
+    def aug_test_imgs(self,
+                      feats,
+                      img_metas,
+                      rescale=False):
+        """Test function of point cloud branch with augmentaiton."""
+        # only support aug_test for one sample
+        aug_occs = []
+        for x, img_meta in zip(feats, img_metas):
+            occ_pred = self.final_conv(x[0]).permute(0, 4, 3, 2, 1)
+            if self.use_predicter:
+                occ_pred = self.predicter(occ_pred)
+            occ_score = occ_pred.softmax(-1)
+            aug_occs.append(occ_score)
+
+        merged_occs = merge_aug_occs(aug_occs)
+        return merged_occs
 
     def forward_train(self,
                       points=None,
