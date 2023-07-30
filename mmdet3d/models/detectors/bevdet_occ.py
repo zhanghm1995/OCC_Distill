@@ -446,6 +446,30 @@ class BEVFusionStereo4DOCC(BEVStereo4DOCC):
                  img=None,
                  rescale=False,
                  **kwargs):
+        """Test function with augmentaiton in batched manner."""
+        points = [item for sublist in points for item in sublist]
+        img_metas = [item for sublist in img_metas for item in sublist]
+        img = [item for sublist in img for item in sublist]
+
+        new_kwargs = dict()
+        for key, value in kwargs.items():
+            new_kwargs[key] = [item for sublist in value for item in sublist]
+        
+        img_feats, _, _ = self.extract_feat(
+            points, img=img, img_metas=img_metas, **new_kwargs)
+
+        ## NOTE: here we assume only use the flip augmentation
+        # occ_res = self.aug_test_imgs(img_feats, 
+        #                              img_metas, 
+        #                              rescale,
+        #                              **kwargs)
+        
+    def aug_test_v1(self, 
+                 points,
+                 img_metas,
+                 img=None,
+                 rescale=False,
+                 **kwargs):
         """Test function with augmentaiton."""
         img_feats, pts_feats, _ = multi_apply(self.extract_feat, 
                                               points, 
