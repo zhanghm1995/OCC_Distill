@@ -195,14 +195,12 @@ test_pipeline = [
         img_scale=(1333, 800),
         pts_scale_ratio=1,
         # Add double-flip augmentation
-        flip=False,
-        
+        flip=True,
+        pcd_horizontal_flip=True,
+        pcd_vertical_flip=True,
+
         transforms=[
-            dict(
-                type='LoadAnnotationsBEVDepth',
-                bda_aug_conf=bda_aug_conf,
-                classes=class_names,
-                is_train=False),
+            dict(type='LoadAnnotationsBEVDepthForTTA'),
             dict(
                 type='PointsRangeFilter', point_cloud_range=point_cloud_range),
             dict(type='PointsConditionalFlip'),
@@ -210,7 +208,8 @@ test_pipeline = [
                 type='DefaultFormatBundle3D',
                 class_names=class_names,
                 with_label=False),
-            dict(type='Collect3D', keys=['points', 'img_inputs'])
+            dict(type='Collect3D', keys=['points', 'img_inputs', 
+                                         'flip_dx', 'flip_dy'])
         ])
 ]
 
@@ -233,8 +232,7 @@ share_data_config = dict(
 
 test_data_config = dict(
     pipeline=test_pipeline,
-    ann_file=data_root + 'bevdetv2-nuscenes_infos_val.pkl',
-    load_interval=250)
+    ann_file=data_root + 'bevdetv2-nuscenes_infos_val.pkl',)
 
 data = dict(
     samples_per_gpu=4,

@@ -1655,10 +1655,14 @@ class LoadAnnotationsBEVDepth(object):
 
 @PIPELINES.register_module()
 class LoadAnnotationsBEVDepthForTTA(object):
+    """This pipeline is used for TTA.
 
-    def __init__(self, bda_aug_conf, classes):
-        self.bda_aug_conf = bda_aug_conf
-        self.classes = classes
+    Args:
+        object (_type_): _description_
+    """
+
+    def __init__(self):
+        pass
 
     def sample_bda_augmentation(self, results):
         """Generate bda augmentation values based on bda_config."""
