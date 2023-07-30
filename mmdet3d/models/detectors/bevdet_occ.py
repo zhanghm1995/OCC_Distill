@@ -11,7 +11,22 @@ from torch import nn
 import numpy as np
 from torch.nn import functional as F
 from einops import repeat, rearrange
+from mmdet.core import multi_apply
+
 from .. import builder
+
+
+def merge_aug_occs(aug_occ_list):
+    """Merge the augmented testing occupacy prediction results
+
+    Args:
+        aug_occ_list (List): each element with shape (200, 200, 16, 18)
+    """
+    merged_occs = torch.stack(aug_occ_list, dim=-1)  # to (200, 200, 16, 18, L)
+    merged_occs = torch.mean(merged_occs, dim=-1)  # to (200, 200, 16, 18)
+    occ_res = merged_occs.argmax(-1)
+    occ_res = occ_res.squeeze(dim=0).cpu().numpy().astype(np.uint8)
+    return occ_res
 
 
 @DETECTORS.register_module()
@@ -302,6 +317,11 @@ class SE_Block(nn.Module):
 
 @DETECTORS.register_module()
 class BEVFusionStereo4DOCC(BEVStereo4DOCC):
+    """Fuse the lidar and camera images for occupancy prediction.
+
+    Args:
+        BEVStereo4DOCC (_type_): _description_
+    """
 
     def __init__(self,
                  se=True,
@@ -419,6 +439,74 @@ class BEVFusionStereo4DOCC(BEVStereo4DOCC):
         occ_res=occ_score.argmax(-1)
         occ_res = occ_res.squeeze(dim=0).cpu().numpy().astype(np.uint8)
         return [occ_res]
+    
+    def aug_test(self, 
+                 points,
+                 img_metas,
+                 img=None,
+                 rescale=False,
+                 **kwargs):
+        """Test function with augmentaiton in batched manner."""
+        points = [item for sublist in points for item in sublist]
+        img_metas = [item for sublist in img_metas for item in sublist]
+        img = [item for sublist in img for item in sublist]
+
+        new_kwargs = dict()
+        for key, value in kwargs.items():
+            new_kwargs[key] = [item for sublist in value for item in sublist]
+        
+        img_feats, _, _ = self.extract_feat(
+            points, img=img, img_metas=img_metas, **new_kwargs)
+
+        ## NOTE: here we assume only use the flip augmentation
+        # occ_res = self.aug_test_imgs(img_feats, 
+        #                              img_metas, 
+        #                              rescale,
+        #                              **kwargs)
+        
+    def aug_test_v1(self, 
+                 points,
+                 img_metas,
+                 img=None,
+                 rescale=False,
+                 **kwargs):
+        """Test function with augmentaiton."""
+        img_feats, pts_feats, _ = multi_apply(self.extract_feat, 
+                                              points, 
+                                              img,
+                                              img_metas, 
+                                              **kwargs)
+        
+        ## NOTE: here we assume only use the flip augmentation
+        occ_res = self.aug_test_imgs(img_feats, img_metas, 
+                                     rescale,
+                                     **kwargs)
+        return [occ_res]
+
+    def aug_test_imgs(self,
+                      feats,
+                      img_metas,
+                      rescale=False,
+                      **kwargs):
+        """Test function of point cloud branch with augmentaiton."""
+        # only support aug_test for one sample
+        aug_occs = []
+        idx = -1
+        for x, img_meta in zip(feats, img_metas):
+            idx += 1
+            occ_pred = self.final_conv(x[0]).permute(0, 4, 3, 2, 1)
+            if self.use_predicter:
+                occ_pred = self.predicter(occ_pred)
+            occ_score = occ_pred.softmax(-1)  # to (1, 200, 200, 16, 18)
+            if kwargs['flip_dx'][idx][0]:
+                occ_score = occ_score.flip(dims=[1])
+            if kwargs['flip_dy'][idx][0]:
+                occ_score = occ_score.flip(dims=[2])
+
+            aug_occs.append(occ_score)
+
+        merged_occs = merge_aug_occs(aug_occs)
+        return merged_occs
 
     def forward_train(self,
                       points=None,
@@ -472,8 +560,44 @@ class BEVFusionStereo4DOCC(BEVStereo4DOCC):
         loss_occ = self.loss_single(voxel_semantics, mask_camera, occ_pred)
         losses.update(loss_occ)
         return losses
+    
+    def forward_test(self,
+                     points=None,
+                     img_metas=None,
+                     img_inputs=None,
+                     **kwargs):
+        """
+        Args:
+            points (list[torch.Tensor]): the outer list indicates test-time
+                augmentations and inner torch.Tensor should have a shape NxC,
+                which contains all points in the batch.
+            img_metas (list[list[dict]]): the outer list indicates test-time
+                augs (multiscale, flip, etc.) and the inner list indicates
+                images in a batch
+            img (list[torch.Tensor], optional): the outer
+                list indicates test-time augmentations and inner
+                torch.Tensor should have a shape NxCxHxW, which contains
+                all images in the batch. Defaults to None.
+        """
+        for var, name in [(img_inputs, 'img_inputs'),
+                          (img_metas, 'img_metas')]:
+            if not isinstance(var, list):
+                raise TypeError('{} must be a list, but got {}'.format(
+                    name, type(var)))
 
+        num_augs = len(img_inputs)
+        if num_augs != len(img_metas):
+            raise ValueError(
+                'num of augmentations ({}) != num of image meta ({})'.format(
+                    len(points), len(img_metas)))
 
+        if num_augs == 1:
+            img_inputs = [img_inputs] if img_inputs is None else img_inputs
+            return self.simple_test(points[0], img_metas[0], 
+                                    img_inputs[0], **kwargs)
+        else:
+            return self.aug_test(points, img_metas, img_inputs, **kwargs)
+        
 
 @DETECTORS.register_module()
 class BEVFusionStereo4DOCCDistill(BEVFusionStereo4DOCC):

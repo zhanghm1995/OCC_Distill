@@ -1651,3 +1651,57 @@ class LoadAnnotationsBEVDepth(object):
                 results['mask_camera'] = results['mask_camera'][:,::-1,...].copy()
                 results['mask_camera_free'] = results['mask_camera_free'][:,::-1,...].copy()
         return results
+    
+
+@PIPELINES.register_module()
+class LoadAnnotationsBEVDepthForTTA(object):
+    """This pipeline is used for TTA.
+
+    Args:
+        object (_type_): _description_
+    """
+
+    def __init__(self):
+        pass
+
+    def sample_bda_augmentation(self, results):
+        """Generate bda augmentation values based on bda_config."""
+        rotate_bda = 0
+        scale_bda = 1.0
+        flip_dx = results['pcd_vertical_flip']
+        flip_dy = results['pcd_horizontal_flip']
+        return rotate_bda, scale_bda, flip_dx, flip_dy
+
+    def bev_transform(self, rotate_angle, scale_ratio, flip_dx, flip_dy):
+        rotate_angle = torch.tensor(rotate_angle / 180 * np.pi)
+        rot_sin = torch.sin(rotate_angle)
+        rot_cos = torch.cos(rotate_angle)
+        rot_mat = torch.Tensor([[rot_cos, -rot_sin, 0], [rot_sin, rot_cos, 0],
+                                [0, 0, 1]])
+        scale_mat = torch.Tensor([[scale_ratio, 0, 0], [0, scale_ratio, 0],
+                                  [0, 0, scale_ratio]])
+        flip_mat = torch.Tensor([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
+        if flip_dx:
+            flip_mat = flip_mat @ torch.Tensor([[-1, 0, 0], [0, 1, 0],
+                                                [0, 0, 1]])
+        if flip_dy:
+            flip_mat = flip_mat @ torch.Tensor([[1, 0, 0], [0, -1, 0],
+                                                [0, 0, 1]])
+        rot_mat = flip_mat @ (scale_mat @ rot_mat)
+        return rot_mat
+
+    def __call__(self, results):
+        rotate_bda, scale_bda, flip_dx, flip_dy = \
+            self.sample_bda_augmentation(results)
+        bda_rot = self.bev_transform(rotate_bda, scale_bda, flip_dx, flip_dy)
+        imgs, rots, trans, intrins = results['img_inputs'][:4]
+        post_rots, post_trans = results['img_inputs'][4:]
+        results['img_inputs'] = (imgs, rots, trans, intrins, post_rots,
+                                 post_trans, bda_rot)
+        
+        ## We use these two conditions in PointsConditionalFlip transform
+        results['flip_dx'] = flip_dx
+        results['flip_dy'] = flip_dy
+        
+        return results
+

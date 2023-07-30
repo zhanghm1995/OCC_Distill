@@ -1,3 +1,11 @@
+'''
+Copyright (c) 2023 by Haiming Zhang. All Rights Reserved.
+
+Author: Haiming Zhang
+Date: 2023-07-30 13:55:11
+Email: haimingzhang@link.cuhk.edu.cn
+Description: 
+'''
 
 _base_ = ['../_base_/datasets/nus-3d.py', '../_base_/default_runtime.py']
 # Global
@@ -176,29 +184,32 @@ train_pipeline = [
 test_pipeline = [
     dict(type='PrepareImageInputs', data_config=data_config, sequential=True),
     dict(
-        type='LoadAnnotationsBEVDepth',
-        bda_aug_conf=bda_aug_conf,
-        classes=class_names,
-        is_train=False),
-    dict(
         type='LoadPointsFromFile',
         coord_type='LIDAR',
         load_dim=5,
         use_dim=[0,1,2,4],
         file_client_args=file_client_args),
     dict(type='PointToEgo'),
-    dict(type='PointsConditionalFlip'),
     dict(
         type='MultiScaleFlipAug3D',
         img_scale=(1333, 800),
         pts_scale_ratio=1,
-        flip=False,
+        # Add double-flip augmentation
+        flip=True,
+        pcd_horizontal_flip=True,
+        pcd_vertical_flip=True,
+
         transforms=[
+            dict(type='LoadAnnotationsBEVDepthForTTA'),
+            dict(
+                type='PointsRangeFilter', point_cloud_range=point_cloud_range),
+            dict(type='PointsConditionalFlip'),
             dict(
                 type='DefaultFormatBundle3D',
                 class_names=class_names,
                 with_label=False),
-            dict(type='Collect3D', keys=['points', 'img_inputs'])
+            dict(type='Collect3D', keys=['points', 'img_inputs', 
+                                         'flip_dx', 'flip_dy'])
         ])
 ]
 
@@ -221,7 +232,7 @@ share_data_config = dict(
 
 test_data_config = dict(
     pipeline=test_pipeline,
-    ann_file=data_root + 'bevdetv2-nuscenes_infos_val.pkl')
+    ann_file=data_root + 'bevdetv2-nuscenes_infos_val.pkl',)
 
 data = dict(
     samples_per_gpu=4,
@@ -253,13 +264,6 @@ lr_config = dict(
     warmup_iters=200,
     warmup_ratio=0.001,
     step=[100,])
-# ## zhm: we change it to cosine annealing
-# lr_config = dict(
-#     policy='CosineAnnealing',
-#     warmup='linear',
-#     warmup_iters=500,
-#     warmup_ratio=1.0 / 3,
-#     min_lr_ratio=1e-3)
 runner = dict(type='EpochBasedRunner', max_epochs=24)
 
 custom_hooks = [
