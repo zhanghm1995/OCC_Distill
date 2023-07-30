@@ -205,7 +205,7 @@ model = dict(
         use_depth_align=True,
         depth_align_loss=dict(
             type='KnowledgeDistillationKLDivLoss', 
-            loss_weight=1.0,
+            loss_weight=100.0,
             T=1))
 )
 
@@ -369,5 +369,7 @@ log_config = dict(
         dict(type='TextLoggerHook'),
         dict(type='TensorboardLoggerHook')
     ])
+
+checkpoint_config = dict(interval=1, max_keep_ckpts=10)
 
 load_from = "bevdet-r50-4d-stereo-as-student-lidar-voxel-ms-w-aug-new-as-teacher.pth"
