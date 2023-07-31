@@ -440,7 +440,7 @@ class BEVFusionStereo4DOCC(BEVStereo4DOCC):
         occ_res = occ_res.squeeze(dim=0).cpu().numpy().astype(np.uint8)
         return [occ_res]
     
-    def aug_test(self, 
+    def aug_test_v1(self, 
                  points,
                  img_metas,
                  img=None,
@@ -464,18 +464,18 @@ class BEVFusionStereo4DOCC(BEVStereo4DOCC):
         #                              rescale,
         #                              **kwargs)
         
-    def aug_test_v1(self, 
+    def aug_test(self, 
                  points,
                  img_metas,
                  img=None,
                  rescale=False,
                  **kwargs):
         """Test function with augmentaiton."""
-        img_feats, pts_feats, _ = multi_apply(self.extract_feat, 
-                                              points, 
-                                              img,
-                                              img_metas, 
-                                              **kwargs)
+        img_feats, _, _ = multi_apply(self.extract_feat, 
+                                      points, 
+                                      img,
+                                      img_metas, 
+                                      **kwargs)
         
         ## NOTE: here we assume only use the flip augmentation
         occ_res = self.aug_test_imgs(img_feats, img_metas, 
@@ -488,7 +488,7 @@ class BEVFusionStereo4DOCC(BEVStereo4DOCC):
                       img_metas,
                       rescale=False,
                       **kwargs):
-        """Test function of point cloud branch with augmentaiton."""
+        """Test function of image branch with augmentaiton."""
         # only support aug_test for one sample
         aug_occs = []
         idx = -1
