@@ -53,6 +53,7 @@ numC_Trans = 32
 teacher_model = dict(
     type='MyBEVLidarOCCNeRF',
     use_mask=True,
+    return_weights=True,
 
     pts_voxel_layer=dict(
         point_cloud_range=point_cloud_range,
@@ -113,6 +114,7 @@ student_model = dict(
     align_after_view_transfromation=False,
     num_adj=len(range(*multi_adj_frame_id_cfg)),
     scene_filter_index=10086, # all scenes
+    return_weights=True,
     
     img_backbone=dict(
         type='ResNet',
