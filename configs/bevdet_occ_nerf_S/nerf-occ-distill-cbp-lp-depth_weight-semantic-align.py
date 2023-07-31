@@ -2,9 +2,9 @@
 Copyright (c) 2023 by Haiming Zhang. All Rights Reserved.
 
 Author: Haiming Zhang
-Date: 2023-07-30 23:47:12
+Date: 2023-07-31 15:21:55
 Email: haimingzhang@link.cuhk.edu.cn
-Description: depth weight and semantic align
+Description: depth weight distribution and semantic map align.
 '''
 
 _base_ = ['../_base_/datasets/nus-3d.py', '../_base_/default_runtime.py']
@@ -198,13 +198,13 @@ model = dict(
     use_distill_mask=True,
     
     occ_distill_head=dict(
-        type='NeRFOccDistillSimpleHead',
+        type='NeRFOccDistillHead',
         use_depth_align=True,
         use_semantic_align=True,
-        depth_loss_type='sml1',
-        loss_depth_align_weight=0.1,
-        variance_focus=0.85,
-        depth_range=grid_config['depth'][:2])
+        depth_align_loss=dict(
+            type='KnowledgeDistillationKLDivLoss', 
+            loss_weight=100.0,
+            T=1))
 )
 
 # Data

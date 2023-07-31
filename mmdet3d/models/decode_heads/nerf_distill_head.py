@@ -135,11 +135,13 @@ class NeRFOccDistillHead(BaseModule):
     def __init__(self,
                  use_depth_align=False,
                  use_semantic_align=False,
+                 use_occ_logits_align=False,
                  depth_align_loss=dict(
                     type='KnowledgeDistillationKLDivLoss', 
                     loss_weight=1.0),
-                 detach_target=False,
                  loss_semantic_align_weight=1.0,
+                 occ_logits_align_loss=None,
+                 detach_target=False,
                  init_cfg=None,
                  **kwargs):
         
@@ -151,6 +153,12 @@ class NeRFOccDistillHead(BaseModule):
         self.detach_target = detach_target
 
         self.compute_depth_align_loss = build_loss(depth_align_loss)
+
+        self.use_occ_logits_align = use_occ_logits_align
+        if use_occ_logits_align:
+            assert occ_logits_align_loss is not None
+            self.compute_occ_logits_align_loss = build_loss(
+                occ_logits_align_loss)
         
     def loss(self, 
              student_feats: Dict,
@@ -170,12 +178,33 @@ class NeRFOccDistillHead(BaseModule):
         if self.use_semantic_align:
             render_semantic_stu = student_feats['render_semantic']
             render_semantic_tea = teacher_feats['render_semantic']
-            loss_semantic_align = self.compute_semantic_loss_flatten(
+            loss_semantic_align = self.compute_semantic_kl_loss(
                 render_semantic_stu, render_semantic_tea,
                 loss_weight=self.loss_semantic_align_weight)
             losses['loss_semantic_align'] = loss_semantic_align
+        
+        if self.use_occ_logits_align:
+            occ_logits_stu = student_feats['occ_logits']
+            occ_logits_tea = teacher_feats['occ_logits']
+            loss_occ_logits_align = self.compute_occ_logits_align_loss(
+                occ_logits_stu, occ_logits_tea)
+            losses['loss_occ_logits_align'] = loss_occ_logits_align
 
         return losses
+    
+    def compute_semantic_kl_loss(self, 
+                                 sem_est, 
+                                 sem_gt, 
+                                 loss_weight=1.0):
+        '''
+        Args:
+            sem_est: N, C
+            sem_gt: N, C
+        '''
+        kl_loss = F.kl_div(
+            F.log_softmax(sem_est, dim=1),
+            F.softmax(sem_gt.detach(), dim=1))
+        return loss_weight * kl_loss
 
 
 @HEADS.register_module()
