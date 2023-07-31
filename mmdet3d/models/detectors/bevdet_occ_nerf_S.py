@@ -376,6 +376,8 @@ class MyBEVStereo4DOCCNeRF(BEVStereo4D):
         losses['loss_depth'] = loss_depth
         render_img_gt = kwargs['render_gt_img']
         render_gt_depth = kwargs['render_gt_depth']
+        
+        internal_feats_dict = dict()
 
         # occupancy prediction
         occ_pred = self.final_conv(img_feats[0]).permute(0, 4, 3, 2, 1)  # bncdhw->bnwhdc
@@ -390,6 +392,8 @@ class MyBEVStereo4DOCCNeRF(BEVStereo4D):
             occ_pred = occ_pred[..., :-3]
         loss_occ = self.loss_single(voxel_semantics, mask_camera, occ_pred)
         losses.update(loss_occ)
+
+        internal_feats_dict['occ_logits'] = occ_pred
         
         # ------ Compute neural rendering losses ------
         occ_pred = occ_pred.permute(0, 4, 1, 2, 3)
@@ -427,7 +431,6 @@ class MyBEVStereo4DOCCNeRF(BEVStereo4D):
         # torch.cuda.synchronize()
         # start = time.time()
 
-        internal_feats_dict = dict()
         if self.NeRFDecoder.mask_render:
             render_mask = render_gt_depth > 0.0
             rendering_results = self.NeRFDecoder(
