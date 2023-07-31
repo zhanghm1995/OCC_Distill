@@ -2,7 +2,7 @@
 Copyright (c) 2023 by Haiming Zhang. All Rights Reserved.
 
 Author: Haiming Zhang
-Date: 2023-07-31 09:55:43
+Date: 2023-07-30 13:55:11
 Email: haimingzhang@link.cuhk.edu.cn
 Description: 
 '''
@@ -182,6 +182,7 @@ train_pipeline = [
 ]
 
 test_pipeline = [
+    dict(type='PrepareImageInputs', data_config=data_config, sequential=True),
     dict(
         type='LoadPointsFromFile',
         coord_type='LIDAR',
@@ -191,7 +192,7 @@ test_pipeline = [
     dict(type='PointToEgo'),
     dict(
         type='MultiScaleFlipAug3D',
-        img_scale=[(-0.04,), (0.0,), (0.04,)],
+        img_scale=(1333, 800),
         pts_scale_ratio=1,
         # Add double-flip augmentation
         flip=True,
@@ -199,9 +200,6 @@ test_pipeline = [
         pcd_vertical_flip=True,
 
         transforms=[
-            dict(type='PrepareImageInputsForTTA', 
-                data_config=data_config, 
-                sequential=True),
             dict(type='LoadAnnotationsBEVDepthForTTA'),
             dict(
                 type='PointsRangeFilter', point_cloud_range=point_cloud_range),
@@ -234,8 +232,7 @@ share_data_config = dict(
 
 test_data_config = dict(
     pipeline=test_pipeline,
-    ann_file=data_root + 'bevdetv2-nuscenes_infos_val.pkl',
-    load_interval=250)
+    ann_file=data_root + 'bevdetv2-nuscenes_infos_val.pkl',)
 
 data = dict(
     samples_per_gpu=4,
