@@ -39,17 +39,27 @@ class LoadOccGTFromFile(object):
 
 @PIPELINES.register_module()
 class LoadLiDARSegGTFromFile(object):
+    """Load LiDAR point cloud segmentation ground truths from files.
+    Add the key 'lidarseg' to the results dict.
+    """
 
     def __call__(self, results):
         lidarseg_path = results['lidarseg']
         lidarseg = np.fromfile(lidarseg_path, dtype=np.uint8)
         learning_map = {
-            1: 0, 5: 0, 7: 0, 8: 0, 10: 0, 11: 0, 13: 0, 19: 0, 20: 0, 0: 0, 29: 0, 31: 0, 9: 1, 14: 2, 15: 3, 16: 3,
-            17: 4, 18: 5, 21: 6, 2: 7, 3: 7, 4: 7, 6: 7, 12: 8, 22: 9, 23: 10, 24: 11, 25: 12, 26: 13, 27: 14, 28: 15,
+            1: 0, 5: 0, 7: 0, 8: 0, 10: 0, 11: 0, 13: 0, 
+            19: 0, 20: 0, 0: 0, 29: 0, 31: 0, 9: 1, 14: 2, 15: 3, 16: 3,
+            17: 4, 18: 5, 21: 6, 2: 7, 3: 7, 4: 7, 6: 7, 
+            12: 8, 22: 9, 23: 10, 24: 11, 25: 12, 26: 13, 27: 14, 28: 15,
             30: 16
         }
         lidarseg = np.vectorize(learning_map.__getitem__)(lidarseg)
+        num_points = lidarseg.shape[0]
         results['lidarseg'] = torch.Tensor(lidarseg).long()
+        # add lidarseg_pad info
+        lidarseg_pad = torch.zeros(100000)
+        lidarseg_pad[:num_points] = results['lidarseg']
+        results['lidarseg_pad'] = lidarseg_pad
         return results
 
 

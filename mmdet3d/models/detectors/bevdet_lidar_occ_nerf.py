@@ -408,7 +408,7 @@ class MyBEVLidarOCCNeRF(CenterPoint):
                                   return_loss=False,
                                   logits_as_prob_feat=False,
                                   **kwargs):       
-        img_feats, pts_feats = self.extract_feat(
+        _, pts_feats = self.extract_feat(
             points, img=img, img_metas=img_metas, **kwargs)
         
         losses = dict()
@@ -423,10 +423,16 @@ class MyBEVLidarOCCNeRF(CenterPoint):
         render_img_gt = kwargs['render_gt_img']
         render_gt_depth = kwargs['render_gt_depth']
 
+        ## we use the internal_feats_dict to store the intermediate
+        # features used in computing distillation losses
+        internal_feats_dict = dict()
+
         # occupancy losses
         if self.NeRFDecoder.img_recon_head:
             occ_pred = occ_pred[..., :-3]
+        
         # loss_occ = self.loss_single(voxel_semantics, mask_camera, occ_pred)
+        internal_feats_dict['occ_logits'] = occ_pred
         
         # ------ Compute neural rendering losses ------
         occ_pred = occ_pred.permute(0, 4, 1, 2, 3)
@@ -463,7 +469,6 @@ class MyBEVLidarOCCNeRF(CenterPoint):
         # torch.cuda.synchronize()
         # start = time.time()
 
-        internal_feats_dict = dict()
         if self.NeRFDecoder.mask_render:
             render_mask = render_gt_depth > 0.0
             rendering_results = self.NeRFDecoder(

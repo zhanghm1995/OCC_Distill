@@ -10,6 +10,7 @@ from .bevdet_lidar_occ import BEVLidarOCC, LidarOCC
 from .bevdet_lidar_occ_nerf import MyBEVLidarOCCNeRF
 from .bevdet_lidar_distill_camera_occ import BEVLidarDistillCameraOCC
 from .bevdet_lidar_distill_camera_occ_nerf import MyBEVLidarDistillCameraOCCNeRF
+from .bevdet_occ_segmentor import BEVStereo4DOCCSegmentor
 from .centerpoint import CenterPoint
 from .dynamic_voxelnet import DynamicVoxelNet
 from .fcos_mono3d import FCOSMono3D
@@ -39,5 +40,5 @@ __all__ = [
     'BEVLidarOCC', 'LidarOCC', 'BEVLidarDistillCameraOCC',
     'BEVFusionStereo4DSSCOCC', 'BEVStereo4DOCCPretrain', 'MyBEVStereo4DOCCNeRF',
     'MyBEVStereo4DOCCNeRFV1', 'MyBEVLidarOCCNeRF',
-    'MyBEVLidarDistillCameraOCCNeRF'
+    'MyBEVLidarDistillCameraOCCNeRF', 'BEVStereo4DOCCSegmentor'
 ]
