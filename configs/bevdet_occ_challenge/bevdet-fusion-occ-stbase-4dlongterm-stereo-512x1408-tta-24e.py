@@ -1,5 +1,11 @@
-# Copyright (c) Phigent Robotics. All rights reserved.
+'''
+Copyright (c) 2023 by Haiming Zhang. All Rights Reserved.
 
+Author: Haiming Zhang
+Date: 2023-07-31 03:27:45
+Email: haimingzhang@link.cuhk.edu.cn
+Description: Testing pipeline with TTA.
+'''
 
 _base_ = ['../_base_/datasets/nus-3d.py', '../_base_/default_runtime.py']
 # For nuScenes we usually do 10-class detection
@@ -189,12 +195,6 @@ train_pipeline = [
 ]
 
 test_pipeline = [
-    dict(type='PrepareImageInputs', data_config=data_config, sequential=True),
-    dict(
-        type='LoadAnnotationsBEVDepth',
-        bda_aug_conf=bda_aug_conf,
-        classes=class_names,
-        is_train=False),
     dict(
         type='LoadPointsFromFile',
         coord_type='LIDAR',
@@ -202,18 +202,30 @@ test_pipeline = [
         use_dim=[0,1,2,4],
         file_client_args=file_client_args),
     dict(type='PointToEgo'),
-    dict(type='PointsConditionalFlip'),
     dict(
         type='MultiScaleFlipAug3D',
-        img_scale=(1333, 800),
+        img_scale=[(-0.04,), (0.0,), (0.04,)],
         pts_scale_ratio=1,
-        flip=False,
+        # Add double-flip augmentation
+        flip=True,
+        pcd_horizontal_flip=True,
+        pcd_vertical_flip=True,
+
         transforms=[
+            dict(type='PrepareImageInputsForTTA', 
+                data_config=data_config, 
+                sequential=True),
+            dict(type='LoadAnnotationsBEVDepthForTTA'),
+            dict(
+                type='PointsRangeFilter', 
+                point_cloud_range=point_cloud_range),
+            dict(type='PointsConditionalFlip'),
             dict(
                 type='DefaultFormatBundle3D',
                 class_names=class_names,
                 with_label=False),
-            dict(type='Collect3D', keys=['points', 'img_inputs'])
+            dict(type='Collect3D', keys=['points', 'img_inputs', 
+                                         'flip_dx', 'flip_dy'])
         ])
 ]
 
@@ -236,7 +248,8 @@ share_data_config = dict(
 
 test_data_config = dict(
     pipeline=test_pipeline,
-    ann_file=data_root + 'bevdetv3-nuscenes_infos_test.pkl')
+    ann_file=data_root + 'bevdetv3-nuscenes_infos_test.pkl',
+    load_interval=250,)
 
 data = dict(
     samples_per_gpu=3,
