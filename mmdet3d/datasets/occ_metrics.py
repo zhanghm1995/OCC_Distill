@@ -49,6 +49,16 @@ def getNumUniqueCells(cells):
     return np.unique(cells[:, 0] + M * cells[:, 1] + M ** 2 * cells[:, 2]).shape[0]
 
 
+def fast_hist(pred, label, n):
+    k = (label >= 0) & (label < n)
+    bin_count = np.bincount(
+        n * label[k].astype(int) + pred[k], minlength=n ** 2)
+    return bin_count[:n ** 2].reshape(n, n)
+
+def per_class_iu(hist):
+    return np.diag(hist) / (hist.sum(1) + hist.sum(0) - np.diag(hist))
+
+
 class Metric_mIoU():
     def __init__(self,
                  save_dir='.',
@@ -146,6 +156,38 @@ class Metric_mIoU():
 
         return self.class_names, mIoU, self.cnt
 
+
+class Metric_Segmentation_mIoU():
+    def __init__(self,
+                 save_dir='.',
+                 num_classes=17,
+                 use_lidar_mask=False,
+                 use_image_mask=False,
+                 ):
+        self.class_names = ['ignore', 'barrier', 'bicycle', 'bus', 'car', 'construction_vehicle',
+                            'motorcycle', 'pedestrian', 'traffic_cone', 'trailer', 'truck',
+                            'driveable_surface', 'other_flat', 'sidewalk', 'terrain', 'manmade', 'vegetation']
+        self.save_dir = save_dir
+        self.use_lidar_mask = use_lidar_mask
+        self.use_image_mask = use_image_mask
+        self.num_classes = num_classes
+        self.hist_list = []
+        self.cnt = 0
+
+    def add_batch(self, semantics_pred, semantics_gt):
+        self.hist_list.append(fast_hist(semantics_pred, semantics_gt, len(self.class_names)))
+        self.cnt += 1
+
+    def count_miou(self):
+        iou = per_class_iu(sum(self.hist_list))
+        # assert cnt == num_samples, 'some samples are not included in the miou calculation'
+        print(f'===> per class IoU of {self.cnt} samples:')
+        for ind_class in range(1, self.num_classes):
+            print(f'===> {self.class_names[ind_class]} - IoU = ' + str(round(iou[ind_class] * 100, 2)))
+
+        print(f'===> mIoU of {self.cnt} samples: ' + str(round(np.nanmean(iou[1:]) * 100, 2)))
+
+        return {'mIoU': round(np.nanmean(iou[1:]) * 100, 2)}
 
 class Metric_FScore():
     def __init__(self,
