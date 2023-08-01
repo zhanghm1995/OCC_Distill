@@ -21,6 +21,25 @@ from mmdet3d.models.losses.lovasz_loss import lovasz_softmax
 from ..builder import HEADS
 
 
+def cross_modality_contrastive_loss(image_features, 
+                                    point_cloud_features, 
+                                    temperature=0.07):
+    # Normalize the features
+    image_features = F.normalize(image_features, dim=-1)
+    point_cloud_features = F.normalize(point_cloud_features, dim=-1)
+
+    # Compute the scalar product between the image features and the point cloud features
+    logits = torch.matmul(image_features, point_cloud_features.t()) / temperature
+
+    # Compute the labels
+    labels = torch.arange(image_features.size(0)).to(image_features.device)
+
+    # Compute the contrastive loss
+    loss = F.cross_entropy(logits, labels)
+
+    return loss
+
+
 @HEADS.register_module()
 class NeRFOccDistillSimpleHead(BaseModule):
     """Simple version of the head to do the knowledge distillation
@@ -140,6 +159,7 @@ class NeRFOccDistillHead(BaseModule):
                     type='KnowledgeDistillationKLDivLoss', 
                     loss_weight=1.0),
                  loss_semantic_align_weight=1.0,
+                 semantic_align_type='kl', # kl | contrastive
                  occ_logits_align_loss=None,
                  detach_target=False,
                  init_cfg=None,
@@ -151,6 +171,7 @@ class NeRFOccDistillHead(BaseModule):
         self.use_semantic_align = use_semantic_align
         self.loss_semantic_align_weight = loss_semantic_align_weight
         self.detach_target = detach_target
+        self.semantic_align_type = semantic_align_type
 
         self.compute_depth_align_loss = build_loss(depth_align_loss)
 
@@ -178,9 +199,25 @@ class NeRFOccDistillHead(BaseModule):
         if self.use_semantic_align:
             render_semantic_stu = student_feats['render_semantic']
             render_semantic_tea = teacher_feats['render_semantic']
-            loss_semantic_align = self.compute_semantic_kl_loss(
-                render_semantic_stu, render_semantic_tea,
-                loss_weight=self.loss_semantic_align_weight)
+            
+            if self.semantic_align_type == 'kl':
+                loss_semantic_align = self.compute_semantic_kl_loss(
+                    render_semantic_stu, render_semantic_tea,
+                    loss_weight=self.loss_semantic_align_weight)
+            elif self.semantic_align_type == 'contrastive':
+                assert 'instance_mask' in kwargs
+
+                instance_mask = kwargs['instance_mask']
+                render_mask = kwargs['render_mask']
+                instance_mask = instance_mask[render_mask]
+
+                loss_semantic_align = self.compute_semantic_contrastive_loss(
+                    render_semantic_stu, render_semantic_tea,
+                    instance_mask=instance_mask,
+                    loss_weight=self.loss_semantic_align_weight)
+            else:
+                raise NotImplementedError()
+            
             losses['loss_semantic_align'] = loss_semantic_align
         
         if self.use_occ_logits_align:
@@ -205,154 +242,23 @@ class NeRFOccDistillHead(BaseModule):
             F.log_softmax(sem_est, dim=1),
             F.softmax(sem_gt.detach(), dim=1))
         return loss_weight * kl_loss
-
-
-@HEADS.register_module()
-class NeRFOccDistillHeadV1(BaseModule):
-    """The head to do the knowledge distillation by using the neural rendering.
-
-    Args:
-        BaseModule (_type_): _description_
-    """
-
-    def __init__(self,
-                 use_kl_loss=False,
-                 use_affinity_loss=False,
-                 detach_target=False,
-                 loss_high_feat=dict(
-                    type='L1Loss',
-                    loss_weight=1.0),
-                 loss_prob_feat=dict(
-                    type='L1Loss', 
-                    loss_weight=1.0),
-                 init_cfg=None,
-                 **kwargs):
-        
-        super(NeRFOccDistillHead, self).__init__(init_cfg=init_cfg)
-        self.use_kl_loss = use_kl_loss
-        self.use_affinity_loss = use_affinity_loss
-        self.detach_target = detach_target
-        
-        if loss_high_feat is not None:
-            self.loss_high_feat = build_loss(loss_high_feat)
-        
-        self.loss_prob_feat = build_loss(loss_prob_feat)
     
-    @property
-    def with_high_feat_loss(self):
-        """bool: Whether calculate the high-level feature alignment loss."""
-        return hasattr(self,
-                       'loss_high_feat') and self.loss_high_feat is not None
+    def compute_semantic_contrastive_loss(self,
+                                          render_semantic_stu,
+                                          render_semantic_tea,
+                                          instance_mask,
+                                          loss_weight=1.0):
+        ## scatter the features according to the instance mask
+        grouped_semantic_stu = scatter_mean(render_semantic_stu,
+                                            instance_mask,
+                                            dim=1)
+        grouped_semantic_tea = scatter_mean(render_semantic_tea,
+                                            instance_mask,
+                                            dim=1)
+        loss_semantic_align = cross_modality_contrastive_loss(
+            grouped_semantic_stu, grouped_semantic_tea)
+        return loss_semantic_align * loss_weight
 
-    def loss(self, 
-             teacher_feats_list, 
-             student_feats_list,
-             use_distill_mask=False,
-             mask=None,
-             **kwargs):
-        
-        losses = dict()
-
-        if use_distill_mask:
-            assert mask is not None
-
-            if self.use_affinity_loss:
-                high_feat_loss = self.compute_inter_affinity_loss(
-                    student_feats_list[1],
-                    teacher_feats_list[1],
-                    mask)
-                losses['high_feat_loss'] = high_feat_loss
-            elif self.with_high_feat_loss:
-                mask1 = repeat(mask, 'b h w d -> b c d h w', 
-                               c=student_feats_list[1].shape[1])
-                mask1 = mask1.to(torch.float32)
-                num_total_samples1 = mask1.sum()
-                high_feat_loss = self.loss_high_feat(
-                    student_feats_list[1], teacher_feats_list[1], 
-                    mask1, avg_factor=num_total_samples1)
-                
-                losses['high_feat_loss'] = high_feat_loss
-
-            if self.use_kl_loss:
-                mask2 = mask.reshape(-1)
-                num_total_samples2 = mask2.sum()
-
-                num_classes = student_feats_list[2].shape[4]
-
-                pred = student_feats_list[2].reshape(-1, num_classes)
-                target = teacher_feats_list[2].reshape(-1, num_classes)
-
-                prob_feat_loss = self.loss_prob_feat(
-                    pred, target,
-                    mask2, avg_factor=num_total_samples2)
-            else:
-                mask2 = repeat(mask, 'b h w d -> b h w d c', 
-                               c=student_feats_list[2].shape[4])
-                mask2 = mask2.to(torch.float32)
-                num_total_samples2 = mask2.sum()
-                prob_feat_loss = self.loss_prob_feat(
-                    student_feats_list[2], teacher_feats_list[2],
-                    mask2, avg_factor=num_total_samples2)
-            
-        else:
-            high_feat_loss = self.loss_high_feat(student_feats_list[1],
-                                                 teacher_feats_list[1])
-            prob_feat_loss = self.loss_prob_feat(student_feats_list[2],
-                                                 teacher_feats_list[2])
-            
-            losses['high_feat_loss'] = high_feat_loss
-        
-        losses['prob_feat_loss'] = prob_feat_loss
-        return losses
-    
-    def compute_inter_affinity_loss(self,
-                                    student_feats,
-                                    teacher_feats,
-                                    mask):
-        bs = mask.shape[0]
-        student_feats = rearrange(student_feats, 'b c d h w -> b h w d c')
-        teacher_feats = rearrange(teacher_feats, 'b c d h w -> b h w d c')
-
-        all_batch_affinity_loss = []
-        for i in range(bs):
-            curr_mask = mask[i].to(torch.bool)
-            curr_student_feat = student_feats[i][curr_mask]  # to (N, C)
-            curr_teacher_feat = teacher_feats[i][curr_mask]
-
-            curr_student_feat = curr_student_feat.matmul(curr_student_feat.T)  # to (N, N)
-            curr_teacher_feat = curr_teacher_feat.matmul(curr_teacher_feat.T)
-
-            curr_student_feat = F.normalize(curr_student_feat, dim=1)
-            curr_teacher_feat = F.normalize(curr_teacher_feat, dim=1)
-
-            if self.detach_target:
-                curr_teacher_feat = curr_teacher_feat.detach()
-            
-            affinity_loss = F.mse_loss(curr_student_feat, 
-                                       curr_teacher_feat)
-            all_batch_affinity_loss.append(affinity_loss)
-        
-        all_batch_affinity_loss = torch.stack(all_batch_affinity_loss)
-        return all_batch_affinity_loss.mean()
-
-
-# def cross_modality_contrastive_loss(image_features, 
-#                                     point_cloud_features, 
-#                                     temperature=0.07):
-#     # Normalize the features
-#     image_features = F.normalize(image_features, dim=-1)
-#     point_cloud_features = F.normalize(point_cloud_features, dim=-1)
-
-#     # Compute the scalar product between the image features and the point cloud features
-#     logits = torch.matmul(image_features, point_cloud_features.t()) / temperature
-
-#     # Compute the labels
-#     labels = torch.arange(image_features.size(0)).to(image_features.device)
-
-#     # Compute the contrastive loss
-#     loss = F.cross_entropy(logits, labels)
-
-#     return loss
 
 
 # @HEADS.register_module()
