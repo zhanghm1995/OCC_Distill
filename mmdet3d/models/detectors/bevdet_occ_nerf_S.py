@@ -456,16 +456,17 @@ class MyBEVStereo4DOCCNeRF(BEVStereo4D):
                 loss_nerf = loss_depth
             losses['loss_nerf'] = loss_nerf
 
-            internal_feats_dict['depth_mask'] = render_gt_depth > 0.0
+            internal_feats_dict['render_mask'] = render_mask
 
             if self.NeRFDecoder.semantic_head:
-                    img_semantic = kwargs['img_semantic']
-                    img_semantic = img_semantic[render_mask]
-                    loss_nerf_sem = self.NeRFDecoder.compute_semantic_loss_flatten(semantic_pred, img_semantic, lovasz=self.lovasz)
-                    if torch.isnan(loss_nerf):
-                        print('NaN in SemNeRF loss!')
-                        loss_nerf_sem = loss_depth
-                    losses['loss_nerf_sem'] = loss_nerf_sem
+                img_semantic = kwargs['img_semantic']
+                print("img_semantic", img_semantic.shape)
+                img_semantic = img_semantic[render_mask]
+                loss_nerf_sem = self.NeRFDecoder.compute_semantic_loss_flatten(semantic_pred, img_semantic, lovasz=self.lovasz)
+                if torch.isnan(loss_nerf):
+                    print('NaN in SemNeRF loss!')
+                    loss_nerf_sem = loss_depth
+                losses['loss_nerf_sem'] = loss_nerf_sem
 
             if self.NeRFDecoder.img_recon_head:
                 batch_size, num_camera = intricics.shape[:2]

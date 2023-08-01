@@ -248,7 +248,7 @@ share_data_config = dict(
 
 test_data_config = dict(
     pipeline=test_pipeline,
-    ann_file=data_root + 'bevdetv3-nuscenes_infos_test.pkl')
+    ann_file=data_root + '/test/bevdetv3-nuscenes_infos_test_split0.pkl')
 
 data = dict(
     samples_per_gpu=3,

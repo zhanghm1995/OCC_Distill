@@ -85,7 +85,7 @@ class MyBEVLidarDistillCameraOCCNeRF(Base3DDetector):
         distill_loss_dict = self.occ_distill_head.loss(
             student_internal_feats,
             teacher_internal_feats, 
-            depth_mask=student_internal_feats['depth_mask'],
+            render_mask=student_internal_feats['render_mask'],
             **kwargs)
         
         losses.update(distill_loss_dict)
