@@ -1758,10 +1758,12 @@ class LoadInstanceMaskFromFile(PrepareImageInputsForNeRF):
 
     def __init__(self, 
                  data_config,
-                 mode='json', 
-                 instance_seg_name='superpixels_sam'):
+                 mode='png', 
+                 instance_seg_name='superpixels_sam',
+                 sequential=False):
         self.data_config = data_config
         self.render_size = data_config['render_size']
+        self.sequential = sequential
         self.mode = mode
         self.instance_seg_name = instance_seg_name
 
@@ -1790,7 +1792,7 @@ class LoadInstanceMaskFromFile(PrepareImageInputsForNeRF):
         elif self.mode == 'png':
             instance_imgs = []
             for cam_name in results['cam_names']:
-                cam_data = results[cam_name]
+                cam_data = results['curr']['cams'][cam_name]
                 cam_token = cam_data['sample_data_token']
                 instance_mask_path = osp.join(
                     f"./data/nuscenes/{self.instance_seg_name}", 
@@ -1813,7 +1815,8 @@ class LoadInstanceMaskFromFile(PrepareImageInputsForNeRF):
                                        crop=img_non_aug[2],
                                        flip=img_non_aug[3],
                                        rotate=img_non_aug[4])
-                instance_imgs.append(np.array(instance_img))
+                instance_img = torch.from_numpy(np.array(instance_img))
+                instance_imgs.append(instance_img)
 
                 if self.sequential:
                     assert 'adjacent' in results
@@ -1827,7 +1830,9 @@ class LoadInstanceMaskFromFile(PrepareImageInputsForNeRF):
                         instance_img_adjacent = self.img_transform_core(
                             instance_img_adjacent, self.data_config.render_size[::-1],
                             None, False, None)
-                        instance_imgs.append(np.array(instance_img_adjacent))
+                        
+                        instance_img_adjacent = torch.from_numpy(np.array(instance_img_adjacent))
+                        instance_imgs.append(instance_img_adjacent)
                 
         else:
             raise NotImplementedError

@@ -204,8 +204,7 @@ model = dict(
         use_occ_logits_align=True,
         occ_logits_align_loss=dict(
             type='KnowledgeDistillationKLDivLoss', 
-            loss_weight=0.1,
-            T=1))
+            loss_weight=0.1))
 )
 
 # Data
