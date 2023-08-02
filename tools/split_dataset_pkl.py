@@ -44,13 +44,13 @@ def split_pickle(pickle_file_path):
 
     print(len(data_infos), type(dataset), dataset.keys())
 
-    splited_data_infos = split_frames(data_infos, num_splits=6)
+    splited_data_infos = split_frames(data_infos, num_splits=4)
     print(len(splited_data_infos))
 
     basename = osp.basename(pickle_file_path)
     basename = basename.split(".")[0]
     for i, split_data_infos in enumerate(splited_data_infos):
-        save_path = f"data/nuscenes/test/{basename}_split{i}.pkl"
+        save_path = f"data/nuscenes/test_test/{basename}_split{i}.pkl"
 
         split_data_pickle = {'metadata': metadata, 
                              'infos': split_data_infos}
@@ -59,5 +59,5 @@ def split_pickle(pickle_file_path):
 
 
 if __name__ == "__main__":
-    pickle_file_path = "data/nuscenes/bevdetv3-nuscenes_infos_test.pkl"
+    pickle_file_path = "data/nuscenes/test/bevdetv3-nuscenes_infos_test_split3.pkl"
     split_pickle(pickle_file_path)

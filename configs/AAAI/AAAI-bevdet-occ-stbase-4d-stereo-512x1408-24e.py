@@ -2,9 +2,9 @@
 Copyright (c) 2023 by Haiming Zhang. All Rights Reserved.
 
 Author: Haiming Zhang
-Date: 2023-07-31 03:27:45
+Date: 2023-08-02 21:51:17
 Email: haimingzhang@link.cuhk.edu.cn
-Description: Testing pipeline with TTA.
+Description: The student model.
 '''
 
 _base_ = ['../_base_/datasets/nus-3d.py', '../_base_/default_runtime.py']
@@ -40,15 +40,14 @@ grid_config = {
     'depth': [1.0, 45.0, 0.5],
 }
 
-point_cloud_range = [-40, -40, -1, 40, 40, 5.4]
-voxel_size = [0.2, 0.2, 6.4]
+voxel_size = [0.1, 0.1, 0.2]
 
 numC_Trans = 32
 
-multi_adj_frame_id_cfg = (1, 6+1, 1)
+multi_adj_frame_id_cfg = (1, 1+1, 1)
 
 model = dict(
-    type='BEVFusionStereo4DSSCOCC',
+    type='BEVStereo4DSSCOCC',
     align_after_view_transfromation=False,
     num_adj=len(range(*multi_adj_frame_id_cfg)),
     img_backbone=dict(
@@ -115,39 +114,6 @@ model = dict(
         num_channels=[numC_Trans,],
         stride=[1,],
         backbone_output_ids=[0,]),
-    
-    ### The lidar branch, adopted from BEVFusion
-    pts_voxel_layer=dict(
-        max_num_points=64,
-        point_cloud_range=point_cloud_range,
-        voxel_size=voxel_size,
-        max_voxels=(30000, 40000)),
-    pts_voxel_encoder=dict(
-        type='HardVFE',
-        in_channels=4,
-        feat_channels=[64, 64],
-        with_distance=False,
-        voxel_size=voxel_size,
-        with_cluster_center=True,
-        with_voxel_center=True,
-        point_cloud_range=point_cloud_range,
-        norm_cfg=dict(type='naiveSyncBN1d', eps=1e-3, momentum=0.01)),
-    pts_middle_encoder=dict(
-        type='PointPillarsScatter', in_channels=64, output_shape=[400, 400]),
-    pts_backbone=dict(
-        type='SECOND',
-        in_channels=64,
-        norm_cfg=dict(type='naiveSyncBN2d', eps=1e-3, momentum=0.01),
-        layer_nums=[3, 5, 5],
-        layer_strides=[2, 2, 2],
-        out_channels=[64, 128, 256]),
-    pts_neck=dict(
-        type='SECONDFPN',
-        norm_cfg=dict(type='naiveSyncBN2d', eps=1e-3, momentum=0.01),
-        in_channels=[64, 128, 256],
-        upsample_strides=[1, 2, 4],
-        out_channels=[128, 128, 128]),
-    
     loss_occ=dict(
         type='CrossEntropyLoss',
         use_sigmoid=False,
@@ -182,50 +148,39 @@ train_pipeline = [
         type='LoadPointsFromFile',
         coord_type='LIDAR',
         load_dim=5,
-        use_dim=[0,1,2,4],
+        use_dim=5,
         file_client_args=file_client_args),
     dict(type='PointToMultiViewDepth', downsample=1, grid_config=grid_config),
-    dict(type='PointToEgo'),
-    dict(type='PointsRangeFilter', point_cloud_range=point_cloud_range),
-    dict(type='PointsConditionalFlip'),
     dict(type='DefaultFormatBundle3D', class_names=class_names),
     dict(
-        type='Collect3D', keys=['points', 'img_inputs', 'gt_depth', 'voxel_semantics',
+        type='Collect3D', keys=['img_inputs', 'gt_depth', 'voxel_semantics',
                                 'mask_lidar','mask_camera'])
 ]
 
 test_pipeline = [
+    dict(type='PrepareImageInputs', data_config=data_config, sequential=True),
+    dict(
+        type='LoadAnnotationsBEVDepth',
+        bda_aug_conf=bda_aug_conf,
+        classes=class_names,
+        is_train=False),
     dict(
         type='LoadPointsFromFile',
         coord_type='LIDAR',
         load_dim=5,
-        use_dim=[0,1,2,4],
+        use_dim=5,
         file_client_args=file_client_args),
-    dict(type='PointToEgo'),
     dict(
         type='MultiScaleFlipAug3D',
-        img_scale=[(-0.04,), (0.0,), (0.04,)],
+        img_scale=(1333, 800),
         pts_scale_ratio=1,
-        # Add double-flip augmentation
-        flip=True,
-        pcd_horizontal_flip=False,
-        pcd_vertical_flip=True,
-
+        flip=False,
         transforms=[
-            dict(type='PrepareImageInputsForTTA', 
-                data_config=data_config, 
-                sequential=True),
-            dict(type='LoadAnnotationsBEVDepthForTTA'),
-            dict(
-                type='PointsRangeFilter', 
-                point_cloud_range=point_cloud_range),
-            dict(type='PointsConditionalFlip'),
             dict(
                 type='DefaultFormatBundle3D',
                 class_names=class_names,
                 with_label=False),
-            dict(type='Collect3D', keys=['points', 'img_inputs', 
-                                         'flip_dx', 'flip_dy'])
+            dict(type='Collect3D', keys=['points', 'img_inputs'])
         ])
 ]
 
@@ -248,14 +203,14 @@ share_data_config = dict(
 
 test_data_config = dict(
     pipeline=test_pipeline,
-    ann_file=data_root + '/test_test/bevdetv3-nuscenes_infos_test_split3_split2.pkl')
+    ann_file=data_root + 'bevdetv3-lidarseg-nuscenes_infos_train.pkl')
 
 data = dict(
-    samples_per_gpu=3,
+    samples_per_gpu=2,  # with 32 GPU
     workers_per_gpu=8,
     train=dict(
         data_root=data_root,
-        ann_file=data_root + 'bevdetv2-nuscenes_infos_trainval-yx.pkl',
+        ann_file=data_root + 'bevdetv3-lidarseg-nuscenes_infos_train.pkl',
         pipeline=train_pipeline,
         classes=class_names,
         test_mode=False,
@@ -270,16 +225,24 @@ for key in ['val', 'train', 'test']:
     data[key].update(share_data_config)
 
 # Optimizer
-optimizer = dict(type='AdamW', lr=2e-4, weight_decay=0.01)
+optimizer = dict(
+    type='AdamW',
+    lr=2e-4,
+    # paramwise_cfg=dict(
+    #     custom_keys={
+    #         'img_backbone': dict(lr_mult=0.1),
+    #     }),
+    weight_decay=0.01)
 optimizer_config = dict(grad_clip=dict(max_norm=35, norm_type=2))
-
+# learning policy
 lr_config = dict(
     policy='CosineAnnealing',
     warmup='linear',
     warmup_iters=500,
     warmup_ratio=1.0 / 3,
     min_lr_ratio=1e-3)
-runner = dict(type='EpochBasedRunner', max_epochs=24)
+total_epochs = 24
+runner = dict(type='EpochBasedRunner', max_epochs=total_epochs)
 
 custom_hooks = [
     dict(
@@ -295,3 +258,10 @@ custom_hooks = [
 
 load_from = "exps/bevdet-dev2.1/bevdet-stbase-4d-stereo-512x1408-cbgs.pth"
 # fp16 = dict(loss_scale='dynamic')
+log_config = dict(
+    interval=50,
+    hooks=[
+        dict(type='TextLoggerHook'),
+        dict(type='TensorboardLoggerHook')
+    ])
+checkpoint_config = dict(interval=2, max_keep_ckpts=10)
