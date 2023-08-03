@@ -256,8 +256,6 @@ custom_hooks = [
     ),
 ]
 
-load_from = "exps/bevdet-dev2.1/bevdet-stbase-4d-stereo-512x1408-cbgs.pth"
-# fp16 = dict(loss_scale='dynamic')
 log_config = dict(
     interval=50,
     hooks=[
@@ -265,3 +263,5 @@ log_config = dict(
         dict(type='TensorboardLoggerHook')
     ])
 checkpoint_config = dict(interval=2, max_keep_ckpts=10)
+
+load_from = "exps/bevdet-dev2.1/bevdet-stbase-4d-stereo-512x1408-cbgs.pth"
