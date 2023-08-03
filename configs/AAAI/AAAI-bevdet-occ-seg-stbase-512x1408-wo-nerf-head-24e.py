@@ -2,9 +2,9 @@
 Copyright (c) 2023 by Haiming Zhang. All Rights Reserved.
 
 Author: Haiming Zhang
-Date: 2023-08-02 21:51:17
+Date: 2023-08-03 11:11:24
 Email: haimingzhang@link.cuhk.edu.cn
-Description: The student model.
+Description: 
 '''
 
 _base_ = ['../_base_/datasets/nus-3d.py', '../_base_/default_runtime.py']
@@ -20,9 +20,13 @@ data_config = {
         'CAM_BACK', 'CAM_BACK_RIGHT'
     ],
     'Ncams':
-    6,
+        6,
     'input_size': (512, 1408),
+    # 'input_size': (224, 352), # SMALL FOR DEBUG
     'src_size': (900, 1600),
+    'render_size': (90, 160), # SMALL FOR DEBUG
+    # 'render_size': (120, 240), # SMALL FOR DEBUG
+    # 'render_size': (224, 352),
 
     # Augmentation
     'resize': (-0.06, 0.11),
@@ -34,22 +38,29 @@ data_config = {
 
 # Model
 grid_config = {
-    'x': [-40, 40, 0.4],
-    'y': [-40, 40, 0.4],
+    'x': [-51.2, 51.2, 0.4],
+    'y': [-51.2, 51.2, 0.4],
     'z': [-1, 5.4, 0.4],
     'depth': [1.0, 45.0, 0.5],
 }
 
-voxel_size = [0.1, 0.1, 0.2]
+voxel_size = [16, 256, 256]
 
 numC_Trans = 32
 
-multi_adj_frame_id_cfg = (1, 1+1, 1)
+multi_adj_frame_id_cfg = (1, 1 + 1, 1)
 
 model = dict(
-    type='BEVStereo4DSSCOCC',
+    type='BEVStereo4DOCCSegmentor',
     align_after_view_transfromation=False,
     num_adj=len(range(*multi_adj_frame_id_cfg)),
+    scene_filter_index=10086, # all scenes
+    coors_range_xyz=[[grid_config['x'][0], grid_config['x'][1]], 
+                     [grid_config['y'][0], grid_config['y'][1]], 
+                     [grid_config['z'][0], grid_config['z'][1]]],
+    spatial_shape=voxel_size[::-1],
+    num_classes=17,
+
     img_backbone=dict(
         type='SwinTransformer',
         pretrain_img_size=224,
@@ -122,7 +133,7 @@ model = dict(
 )
 
 # Data
-dataset_type = 'NuScenesDatasetOccpancy'
+dataset_type = 'NuScenesDatasetOccpancySegmentation'
 data_root = 'data/nuscenes/'
 file_client_args = dict(backend='disk')
 
@@ -130,15 +141,17 @@ bda_aug_conf = dict(
     rot_lim=(-0., 0.),
     scale_lim=(1., 1.),
     flip_dx_ratio=0.5,
-    flip_dy_ratio=0.5)
+    flip_dy_ratio=0.5,
+)
 
 train_pipeline = [
     dict(
-        type='PrepareImageInputs',
+        type='PrepareImageInputsForNeRF',
         is_train=True,
         data_config=data_config,
         sequential=True),
     dict(type='LoadOccGTFromFile'),
+    dict(type='LoadLiDARSegGTFromFile'),
     dict(
         type='LoadAnnotationsBEVDepth',
         bda_aug_conf=bda_aug_conf,
@@ -150,15 +163,29 @@ train_pipeline = [
         load_dim=5,
         use_dim=5,
         file_client_args=file_client_args),
-    dict(type='PointToMultiViewDepth', downsample=1, grid_config=grid_config),
+    dict(type='PointToMultiViewDepthForNeRF', 
+         downsample=1, 
+         grid_config=grid_config, 
+         render_size=data_config['render_size'],
+         render_scale=[data_config['render_size'][0]/data_config['src_size'][0], 
+                       data_config['render_size'][1]/data_config['src_size'][1]]),
+    dict(type='PointToEgo'),
     dict(type='DefaultFormatBundle3D', class_names=class_names),
+
     dict(
-        type='Collect3D', keys=['img_inputs', 'gt_depth', 'voxel_semantics',
-                                'mask_lidar','mask_camera'])
+        type='Collect3D', keys=['img_inputs', 'gt_depth', 'voxel_semantics', 
+                                'mask_lidar', 'mask_camera', 'scene_number', 
+                                'img_semantic', 'intricics', 'pose_spatial', 
+                                'flip_dx', 'flip_dy', 'render_gt_img', 
+                                'render_gt_depth', 'points', 'lidarseg_pad'])
 ]
 
 test_pipeline = [
-    dict(type='PrepareImageInputs', data_config=data_config, sequential=True),
+    dict(type='PrepareImageInputsForNeRF', 
+         data_config=data_config, 
+         sequential=True),
+    dict(type='LoadOccGTFromFile'),
+    dict(type='LoadLiDARSegGTFromFile'),
     dict(
         type='LoadAnnotationsBEVDepth',
         bda_aug_conf=bda_aug_conf,
@@ -170,6 +197,13 @@ test_pipeline = [
         load_dim=5,
         use_dim=5,
         file_client_args=file_client_args),
+    dict(type='PointToMultiViewDepthForNeRF', 
+         downsample=1, 
+         grid_config=grid_config, 
+         render_size=data_config['render_size'],
+         render_scale=[data_config['render_size'][0] / data_config['src_size'][0], 
+                       data_config['render_size'][1] / data_config['src_size'][1]]),
+    dict(type='PointToEgo'),
     dict(
         type='MultiScaleFlipAug3D',
         img_scale=(1333, 800),
@@ -180,7 +214,10 @@ test_pipeline = [
                 type='DefaultFormatBundle3D',
                 class_names=class_names,
                 with_label=False),
-            dict(type='Collect3D', keys=['points', 'img_inputs'])
+            dict(type='Collect3D', keys=['points', 'img_inputs', 
+                                         'intricics', 'pose_spatial', 
+                                         'render_gt_img', 'img_semantic',
+                                         'render_gt_depth', 'points', 'lidarseg_pad'])
         ])
 ]
 
@@ -225,24 +262,17 @@ for key in ['val', 'train', 'test']:
     data[key].update(share_data_config)
 
 # Optimizer
-optimizer = dict(
-    type='AdamW',
-    lr=2e-4,
-    # paramwise_cfg=dict(
-    #     custom_keys={
-    #         'img_backbone': dict(lr_mult=0.1),
-    #     }),
-    weight_decay=0.01)
-optimizer_config = dict(grad_clip=dict(max_norm=35, norm_type=2))
-# learning policy
+optimizer = dict(type='AdamW', lr=1e-4, weight_decay=1e-2)
+optimizer_config = dict(grad_clip=dict(max_norm=5, norm_type=2))
 lr_config = dict(
     policy='CosineAnnealing',
     warmup='linear',
     warmup_iters=500,
     warmup_ratio=1.0 / 3,
     min_lr_ratio=1e-3)
-total_epochs = 24
-runner = dict(type='EpochBasedRunner', max_epochs=total_epochs)
+runner = dict(type='EpochBasedRunner', max_epochs=25)
+evaluation = dict(interval=24, pipeline=test_pipeline)
+checkpoint_config = dict(interval=24)
 
 custom_hooks = [
     dict(
@@ -256,12 +286,13 @@ custom_hooks = [
     ),
 ]
 
+checkpoint_config = dict(interval=1, max_keep_ckpts=10)
+
 log_config = dict(
-    interval=50,
+    interval=10,
     hooks=[
         dict(type='TextLoggerHook'),
         dict(type='TensorboardLoggerHook')
     ])
-checkpoint_config = dict(interval=2, max_keep_ckpts=10)
 
 load_from = "exps/bevdet-dev2.1/bevdet-stbase-4d-stereo-512x1408-cbgs.pth"
