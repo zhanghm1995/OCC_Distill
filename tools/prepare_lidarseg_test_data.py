@@ -110,11 +110,8 @@ def merge_results(points,
                   coors_range_xyz=[[-40, 40], [-40, 40], [-1, 5.4]],
                   spatial_shape=[200, 200, 16]):
     
-    ## Transform the point cloud to ego coordinates
-
     pc = points[:, :3] # (N, 3)
-    pc_seg = torch.zeros(pc.shape[0], occ_pred.shape[-1]).to(pc.device) # (N, C)
-    lidarseg = torch.from_numpy(deepcopy(lidarseg_pred)) # (N, C)
+    lidarseg = lidarseg_pred.clone() # (N, C)
     mask = gen_point_range_mask(pc, coors_range_xyz)
     unq, unq_inv = voxelization(
         point=pc[mask],
@@ -122,7 +119,7 @@ def merge_results(points,
         coors_range_xyz=coors_range_xyz,
         spatial_shape=spatial_shape,
     )
-    occ_pred = torch.from_numpy(occ_pred).unsqueeze(0).unsqueeze(-1)
+    occ_pred = occ_pred.unsqueeze(0).unsqueeze(-1)
     ## reset the category 17 to 0
     occ_pred[occ_pred == 17] = 0
 
@@ -132,13 +129,11 @@ def merge_results(points,
     # use the occ prediction to replace the lidarseg prediction
     lidarseg[mask] = point_pred
 
-    lidarseg = lidarseg.numpy()
-
     # set the 0 in lidarseg to the value of original lidarseg_pred
     mask = lidarseg == 0
     lidarseg[mask] = lidarseg_pred[mask]
     
-    return lidarseg.astype(np.uint8)
+    return lidarseg.cpu().numpy().astype(np.uint8)
 
 
 def main():
@@ -154,24 +149,31 @@ def main():
     
     data_infos = dataset['infos']
 
-    save_dir = "./RedOCC_lidarseg/lidarseg/test"
+    save_dir = "./RedOCC_lidarseg2/lidarseg/test"
     os.makedirs(save_dir, exist_ok=True)
 
     for idx, info in tqdm(enumerate(data_infos)):
-        save_file_path = osp.join(save_dir, lidar_token + '_lidarseg.bin')
-        if osp.exists(save_file_path):
-            continue
-
         lidar_token = info['lidar_token']
         sample_token = info['token']
         lidar_path = info['lidar_path']
+
+        save_file_path = osp.join(save_dir, lidar_token + '_lidarseg.bin')
+        if osp.exists(save_file_path):
+            print("File exists: ", save_file_path)
+            continue
 
         curr_lidarseg = js3cnet_lidarseg_results[lidar_token]
         curr_point_cloud = np.fromfile(lidar_path, dtype=np.float32).reshape(-1, 5)
         curr_occ = occ_results[sample_token]
 
+        # transform the point cloud to ego coordinates
         curr_point_cloud = torch.from_numpy(curr_point_cloud)
         curr_point_cloud = point_to_ego(curr_point_cloud, info)
+
+        # move to cuda
+        curr_point_cloud = curr_point_cloud.cuda()  
+        curr_lidarseg = torch.from_numpy(curr_lidarseg).cuda()
+        curr_occ = torch.from_numpy(curr_occ).cuda()
 
         occ_lidarseg = merge_results(curr_point_cloud, curr_lidarseg, curr_occ)
         
