@@ -2,9 +2,10 @@
 Copyright (c) 2023 by Haiming Zhang. All Rights Reserved.
 
 Author: Haiming Zhang
-Date: 2023-07-28 11:42:51
+Date: 2023-07-29 09:21:49
 Email: haimingzhang@link.cuhk.edu.cn
-Description: Align the depth weigths from NeRF instead of the depth map.
+Description: Align the depth weigths from NeRF instead of the depth map without
+nerf losses.
 '''
 
 _base_ = ['../_base_/datasets/nus-3d.py', '../_base_/default_runtime.py']
@@ -147,7 +148,7 @@ student_model = dict(
         # render_size=data_config['input_size'],
         render_size=data_config['render_size'],
         depth_range=grid_config['depth'][:2],
-        loss_nerf_weight=0.5,
+        loss_nerf_weight=0.0,
         depth_loss_type='silog',  # ['silog', 'l1', 'rl1', 'sml1']
         variance_focus=0.85,  # only for silog loss
     ),
@@ -204,7 +205,7 @@ model = dict(
         use_depth_align=True,
         depth_align_loss=dict(
             type='KnowledgeDistillationKLDivLoss', 
-            loss_weight=1.0),)
+            loss_weight=1.0))
 )
 
 # Data
@@ -320,8 +321,7 @@ share_data_config = dict(
 
 test_data_config = dict(
     pipeline=test_pipeline,
-    ann_file=data_root + 'bevdetv3-lidarseg-nuscenes_infos_val.pkl',
-    load_interval=250)
+    ann_file=data_root + 'bevdetv3-lidarseg-nuscenes_infos_val.pkl')
 
 data = dict(
     samples_per_gpu=4,
@@ -368,5 +368,7 @@ log_config = dict(
         dict(type='TextLoggerHook'),
         dict(type='TensorboardLoggerHook')
     ])
+
+checkpoint_config = dict(interval=1, max_keep_ckpts=10)
 
 load_from = "bevdet-r50-4d-stereo-as-student-lidar-voxel-ms-w-aug-new-as-teacher.pth"

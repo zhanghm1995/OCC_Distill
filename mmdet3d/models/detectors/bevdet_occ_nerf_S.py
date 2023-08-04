@@ -460,7 +460,6 @@ class MyBEVStereo4DOCCNeRF(BEVStereo4D):
 
             if self.NeRFDecoder.semantic_head:
                 img_semantic = kwargs['img_semantic']
-                print("img_semantic", img_semantic.shape)
                 img_semantic = img_semantic[render_mask]
                 loss_nerf_sem = self.NeRFDecoder.compute_semantic_loss_flatten(semantic_pred, img_semantic, lovasz=self.lovasz)
                 if torch.isnan(loss_nerf):
