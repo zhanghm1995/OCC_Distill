@@ -2,7 +2,7 @@
 from .base import Base3DDetector
 from .bevdet import BEVDepth4D, BEVDet, BEVDet4D, BEVDetTRT, BEVStereo4D
 from .bevdet_occ import BEVStereo4DOCC, BEVFusionStereo4DOCC
-from .bevdet_occ_nerf_S import MyBEVStereo4DOCCNeRF
+from .bevdet_occ_nerf_S import MyBEVStereo4DOCCNeRF, BEVStereo4DSSCOCCNeRF
 from .bevdet_occ_nerf_S_v1 import MyBEVStereo4DOCCNeRFV1
 from .bevdet_occ_pretrain import BEVStereo4DOCCPretrain
 from .bevdet_occ_ssc import BEVFusionStereo4DSSCOCC
@@ -40,5 +40,6 @@ __all__ = [
     'BEVLidarOCC', 'LidarOCC', 'BEVLidarDistillCameraOCC',
     'BEVFusionStereo4DSSCOCC', 'BEVStereo4DOCCPretrain', 'MyBEVStereo4DOCCNeRF',
     'MyBEVStereo4DOCCNeRFV1', 'MyBEVLidarOCCNeRF',
-    'MyBEVLidarDistillCameraOCCNeRF', 'BEVStereo4DOCCSegmentor'
+    'MyBEVLidarDistillCameraOCCNeRF', 'BEVStereo4DOCCSegmentor',
+    'BEVStereo4DSSCOCCNeRF'
 ]

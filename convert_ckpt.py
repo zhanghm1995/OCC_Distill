@@ -159,6 +159,16 @@ def merge_student_teacher_model(student_file_name,
     torch.save(tea_model, save_path)
     
 if __name__ == "__main__":
+    student_filename = "exps/bevdet-dev2.1/bevdet-stbase-4d-stereo-512x1408-cbgs.pth"
+    teacher_filename = "work_dirs/bevdet-fusion-occ-r50-4d-stereo-24e-fix/epoch_24_ema.pth"
+    save_path = "bevdet-stbase-4d-stereo-512x1408-cbgs-as-student-bevdet-fusion-occ-r50-as-teacher.pth"
+    main_merge_student_teacher_models(student_filename, 
+                                      teacher_filename,
+                                      stu_prefix="student_model",
+                                      tea_prefix="teacher_model",
+                                      save_path=save_path)
+    exit(0)
+
     student_fp = "bevdet-r50-4d-stereo-cbgs-as-student-model.pth"
     teacher_fp = "tools/work_dirs/lidar_only/lidar-occ-ms-voxel-w-aug/epoch_24_ema.pth"
     save_path = "bevdet-r50-4d-stereo-as-student-lidar-voxel-ms-w-aug-new-as-teacher.pth"
@@ -215,12 +225,7 @@ if __name__ == "__main__":
     torch.save(pretraining_model, "pretrain-bevdet-occ-r50-4d-stereo-wo-head-24e.pth")
 
     exit(0)
-    student_filename = "bevdet-r50-4d-stereo-cbgs-as-student-model.pth"
-    teacher_filename = "bevdet-lidar-occ-voxel-ms-w-aug-24e_teacher_model-quarter.pth"
-    save_path = "bevdet-r50-4d-stereo-as-student-lidar-voxel-w-aug-as-teacher-quarter.pth"
-    main_merge_student_teacher_models(student_filename, teacher_filename,
-                                      save_path=save_path)
-    exit(0)
+    
     filename = "quarter-bevdet-occ-r50-4d-stereo-24e.pth"
     prefix = "student_model."
     save_path = "bevdet-occ-r50-4d-stereo-24e-linear-sched-as-student-model-quarter.pth"
