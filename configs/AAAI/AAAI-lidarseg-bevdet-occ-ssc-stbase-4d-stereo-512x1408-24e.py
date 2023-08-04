@@ -163,7 +163,7 @@ train_pipeline = [
     dict(
         type='Collect3D', keys=['img_inputs', 'gt_depth', 
                                 'voxel_semantics',
-                                'flip_dx', 'flip_dy', 'points'
+                                'flip_dx', 'flip_dy', 'points',
                                 'mask_lidar','mask_camera',
                                 'lidarseg_pad'])
 ]

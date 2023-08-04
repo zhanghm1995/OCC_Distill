@@ -599,3 +599,19 @@ class BEVStereo4DSSCOCCSegmentor(BEVStereo4D):
         losses.update(loss_occ)
         return losses
     
+    @staticmethod
+    def inverse_flip_aug(feat, flip_dx, flip_dy):
+        batch_size = feat.shape[0]
+        feat_flip = []
+        for b in range(batch_size):
+            flip_flag_x = flip_dx[b]
+            flip_flag_y = flip_dy[b]
+            tmp = feat[b]
+            if flip_flag_x:
+                tmp = tmp.flip(1)
+            if flip_flag_y:
+                tmp = tmp.flip(2)
+            feat_flip.append(tmp)
+        feat_flip = torch.stack(feat_flip)
+        return feat_flip
+    
