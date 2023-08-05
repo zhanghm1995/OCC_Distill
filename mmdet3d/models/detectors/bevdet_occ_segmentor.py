@@ -615,3 +615,266 @@ class BEVStereo4DSSCOCCSegmentor(BEVStereo4D):
         feat_flip = torch.stack(feat_flip)
         return feat_flip
     
+
+@DETECTORS.register_module()
+class BEVStereo4DOCCSegmentorDense(BEVStereo4D):
+
+    def __init__(self,
+                 nerf_head=None,
+                 loss_occ=None,
+                 out_dim=32,
+                 use_mask=False,
+                 num_classes=18,
+                 use_predicter=True,
+                 class_wise=False,
+                 scene_filter_index=-1,
+                 refine_conv=False,
+                 coors_range_xyz=None,
+                 spatial_shape=None,
+                 max_ray_number=80000,
+                 **kwargs):
+        super(BEVStereo4DOCCSegmentorDense, self).__init__(**kwargs)
+        self.out_dim = out_dim
+        self.scene_filter_index = scene_filter_index
+        out_channels = out_dim if use_predicter else num_classes
+        self.num_classes = num_classes
+        self.coors_range_xyz = coors_range_xyz
+        self.spatial_shape = spatial_shape
+
+        if nerf_head is not None:
+            self.NeRFDecoder = builder.build_backbone(nerf_head)
+            self.lovasz = self.NeRFDecoder.lovasz
+            if self.NeRFDecoder.img_recon_head:
+                self.rgb_conv = nn.Sequential(
+                    *[
+                        ConvModule(
+                        self.img_view_transformer.out_channels,
+                        16,
+                        kernel_size=3,
+                        stride=1,
+                        padding=1,
+                        bias=True,
+                        conv_cfg=dict(type='Conv3d')),
+                        ConvModule(
+                            16,
+                            3,
+                            kernel_size=3,
+                            stride=1,
+                            padding=1,
+                            bias=True,
+                            conv_cfg=dict(type='Conv3d'),
+                            act_cfg=dict(type='Sigmoid')
+                        ),
+                    ])
+
+        self.final_conv = ConvModule(
+            self.img_view_transformer.out_channels,
+            out_channels,
+            kernel_size=3,
+            stride=1,
+            padding=1,
+            bias=True,
+            conv_cfg=dict(type='Conv3d'))
+
+        self.up_conv = nn.Sequential(
+            nn.ConvTranspose3d(out_channels, out_channels//2, kernel_size=2, stride=2, padding=0),
+            ConvModule(
+                out_channels//2,
+                out_channels//2,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+                bias=True,
+                conv_cfg=dict(type='Conv3d'))
+        )
+
+        self.use_predicter = use_predicter
+        if use_predicter:
+            self.predicter = nn.Sequential(
+                nn.Linear(out_channels//2, self.out_dim),
+                nn.Softplus(),
+                nn.Linear(self.out_dim, num_classes),
+            )
+
+        self.pts_bbox_head = None
+        self.use_mask = use_mask
+        self.max_ray_number = max_ray_number
+        self.loss_occ = build_loss(loss_occ)
+        self.class_wise = class_wise
+        self.align_after_view_transfromation = False
+
+    def loss_single(self, voxel_semantics, mask_camera, preds, semi_mask):
+        loss_ = dict()
+        mask_camera *= semi_mask.unsqueeze(1).unsqueeze(1).unsqueeze(1)
+        voxel_semantics = voxel_semantics.long()
+        if self.use_mask:
+            mask_camera = mask_camera.to(torch.int32)
+            voxel_semantics = voxel_semantics.reshape(-1)
+            preds = preds.reshape(-1, self.num_classes)
+            mask_camera = mask_camera.reshape(-1)
+            num_total_samples = mask_camera.sum()
+            loss_occ = self.loss_occ(preds, voxel_semantics, mask_camera, avg_factor=num_total_samples)
+            loss_['loss_occ'] = loss_occ
+        else:
+            voxel_semantics = voxel_semantics.reshape(-1)
+            preds = preds.reshape(-1, self.num_classes)
+            loss_occ = self.loss_occ(preds, voxel_semantics, )
+            loss_['loss_occ'] = loss_occ
+        return loss_
+
+    def simple_test(self,
+                    points,
+                    img_metas,
+                    img=None,
+                    rescale=False,
+                    **kwargs):
+        """Test function without augmentaiton."""
+        img_feats, _, _ = self.extract_feat(
+            points, img=img, img_metas=img_metas, **kwargs)
+        occ_pred = self.final_conv(img_feats[0]).permute(0, 1, 4, 3, 2)
+        occ_pred = self.up_conv(occ_pred).permute(0, 2, 3, 4, 1)
+
+        # bncdhw->bnwhdc
+        if self.use_predicter:
+            occ_pred = self.predicter(occ_pred)
+
+        # map voxel prediction onto point cloud
+        pc = points[0][:, :3] # (N, 3)
+        pc_seg = torch.zeros(pc.shape[0], occ_pred.shape[-1]).to(pc.device) # (N, C)
+        mask = gen_point_range_mask(pc, coors_range_xyz=self.coors_range_xyz)
+        unq, unq_inv = voxelization(
+            point=pc[mask],
+            batch_idx=torch.zeros(pc[mask].shape[0]).to(pc.device),
+            coors_range_xyz=self.coors_range_xyz,
+            spatial_shape=self.spatial_shape,
+        )
+        point_pred = occ_pred[unq[:, 0], unq[:, 1], unq[:, 2], unq[:, 3]][unq_inv]
+        pc_seg[mask] = point_pred
+
+        # ignore free category and then conduct softmax
+        occ_score = pc_seg.softmax(-1)
+        occ_res = occ_score.argmax(-1)
+        occ_res = occ_res.cpu().numpy().astype(np.uint8)
+
+        # output lidarseg label
+        lidarseg = kwargs['lidarseg_pad'][0][0][:occ_res.shape[0]]
+        lidarseg = lidarseg.cpu().numpy()
+        assert len(occ_res) == len(lidarseg)
+
+        occ_res = occ_res[mask.cpu().numpy()]
+        lidarseg = lidarseg[mask.cpu().numpy()]
+        return [[occ_res, lidarseg]]
+
+        # ### DEBUG ###
+        # occ_score = occ_pred.softmax(-1)
+        # occ_res = occ_score.argmax(-1)
+        # occ_res = occ_res.squeeze(dim=0).cpu().numpy().astype(np.uint8)
+        # return [occ_res]
+
+    @staticmethod
+    def inverse_flip_aug(feat, flip_dx, flip_dy):
+        batch_size = feat.shape[0]
+        feat_flip = []
+        for b in range(batch_size):
+            flip_flag_x = flip_dx[b]
+            flip_flag_y = flip_dy[b]
+            tmp = feat[b]
+            if flip_flag_x:
+                tmp = tmp.flip(1)
+            if flip_flag_y:
+                tmp = tmp.flip(2)
+            feat_flip.append(tmp)
+        feat_flip = torch.stack(feat_flip)
+        return feat_flip
+
+    @staticmethod
+    def limit_true_count(tensor, max_true_count):
+        flattened = tensor.view(-1)
+        true_indices = torch.nonzero(flattened).squeeze()
+        if true_indices.numel() <= max_true_count:
+            return tensor
+        selected_indices = true_indices[torch.randperm(true_indices.numel())[:max_true_count]]
+        flattened.zero_()
+        flattened[selected_indices] = 1
+        return tensor.view(tensor.size())
+
+    def forward_train(self,
+                      points=None,
+                      img_metas=None,
+                      gt_bboxes_3d=None,
+                      gt_labels_3d=None,
+                      gt_labels=None,
+                      gt_bboxes=None,
+                      img_inputs=None,
+                      proposals=None,
+                      gt_bboxes_ignore=None,
+                      **kwargs):
+        """Forward training function.
+
+        Returns:
+            dict: Losses of different branches.
+        """
+        img_feats, pts_feats, depth = self.extract_feat(
+            points, img=img_inputs, img_metas=img_metas, **kwargs)
+        gt_depth = kwargs['gt_depth']
+        semi_mask = kwargs['scene_number'] < self.scene_filter_index
+        intricics = kwargs['intricics']
+        pose_spatial = kwargs['pose_spatial']
+        batch_size = len(semi_mask)
+        flip_dx, flip_dy = kwargs['flip_dx'], kwargs['flip_dy']
+        losses = dict()
+        loss_depth = self.img_view_transformer.get_depth_loss(
+            gt_depth.view(batch_size, 6, -1, *gt_depth.shape[2:])[:, :, 0],
+            depth)
+        losses['loss_depth'] = loss_depth
+        render_img_gt = kwargs['render_gt_img']
+        render_gt_depth = kwargs['render_gt_depth']
+
+        # occupancy prediction
+        occ_pred = self.final_conv(img_feats[0]).permute(0, 1, 4, 3, 2)
+        occ_pred = self.up_conv(occ_pred).permute(0, 2, 3, 4, 1)
+
+        if self.use_predicter:
+            occ_pred = self.predicter(occ_pred)
+
+        # map point cloud label to voxel
+        lidarseg = kwargs['lidarseg_pad']
+        points_list = []
+        batch_list = []
+        lidarseg_label = []
+        for idx, pc in enumerate(points):
+            pc = pc[:, :3]
+            mask = gen_point_range_mask(pc, coors_range_xyz=self.coors_range_xyz)
+            label = lidarseg[idx][:pc.shape[0]]
+            pc = pc[mask]
+            points_list.append(pc)
+            batch_list.append(torch.ones_like(pc[:, 0]) * idx)
+            lidarseg_label.append(label[mask])
+        points_list = torch.cat(points_list, 0)
+        batch_list = torch.cat(batch_list, 0)
+        lidarseg_label = torch.cat(lidarseg_label, 0)
+        unq, unq_inv = voxelization(
+            point=points_list,
+            batch_idx=batch_list,
+            coors_range_xyz=self.coors_range_xyz,
+            spatial_shape=self.spatial_shape,
+        )
+
+        # scatter label
+        M = unq_inv.max() + 1
+        voxel_lidarseg_label = torch.zeros(M, device=lidarseg_label.device)
+        voxel_lidarseg_label = voxel_lidarseg_label.scatter(0, unq_inv, lidarseg_label)
+
+        # generate voxel label and mask
+        voxel_semantics = torch.zeros_like(occ_pred.argmax(-1)).detach()
+        mask_camera = torch.zeros_like(occ_pred.argmax(-1)).detach()
+        voxel_semantics[unq[:, 0], unq[:, 1], unq[:, 2], unq[:, 3]] = voxel_lidarseg_label.long()
+        mask_camera[unq[:, 0], unq[:, 1], unq[:, 2], unq[:, 3]] = 1
+        mask_camera[voxel_semantics == 0] = 0
+
+        # occupancy losses
+        occ_pred = self.inverse_flip_aug(occ_pred, flip_dx, flip_dy)
+        loss_occ = self.loss_single(voxel_semantics, mask_camera, occ_pred, semi_mask)
+        losses.update(loss_occ)
+
+        return losses
