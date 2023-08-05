@@ -150,11 +150,12 @@ train_pipeline = [
     dict(type='DefaultFormatBundle3D', class_names=class_names),
 
     dict(
-        type='Collect3D', keys=['img_inputs', 'gt_depth', 'voxel_semantics', 
-                                'mask_lidar', 'mask_camera', 'scene_number', 
+        type='Collect3D', keys=['img_inputs', 'gt_depth', 
+                                'voxel_semantics', 'mask_lidar', 'mask_camera', 
+                                'scene_number', 
                                 'img_semantic', 'intricics', 'pose_spatial', 
-                                'flip_dx', 'flip_dy', 'render_gt_img', 
-                                'render_gt_depth', 'points', 'lidarseg_pad'])
+                                'flip_dx', 'flip_dy', 
+                                'points', 'lidarseg_pad'])
 ]
 
 test_pipeline = [
@@ -191,10 +192,9 @@ test_pipeline = [
                 type='DefaultFormatBundle3D',
                 class_names=class_names,
                 with_label=False),
-            dict(type='Collect3D', keys=['points', 'img_inputs', 
+            dict(type='Collect3D', keys=['points', 'img_inputs',
                                          'intricics', 'pose_spatial', 
-                                         'render_gt_img', 'img_semantic',
-                                         'render_gt_depth', 'points', 'lidarseg_pad'])
+                                         'img_semantic', 'lidarseg_pad'])
         ])
 ]
 
@@ -220,7 +220,7 @@ test_data_config = dict(
     ann_file=data_root + 'bevdetv3-lidarseg-nuscenes_infos_val.pkl')
 
 data = dict(
-    samples_per_gpu=4,
+    samples_per_gpu=2,
     workers_per_gpu=8,
     train=dict(
         data_root=data_root,
@@ -242,11 +242,11 @@ for key in ['val', 'train', 'test']:
 optimizer = dict(type='AdamW', lr=1e-4, weight_decay=1e-2)
 optimizer_config = dict(grad_clip=dict(max_norm=5, norm_type=2))
 lr_config = dict(
-    policy='CosineAnnealing',
+    policy='step',
     warmup='linear',
-    warmup_iters=500,
-    warmup_ratio=1.0 / 3,
-    min_lr_ratio=1e-3)
+    warmup_iters=200,
+    warmup_ratio=0.001,
+    step=[100,])
 runner = dict(type='EpochBasedRunner', max_epochs=25)
 evaluation = dict(interval=24, pipeline=test_pipeline)
 checkpoint_config = dict(interval=24)
@@ -262,7 +262,7 @@ custom_hooks = [
 checkpoint_config = dict(interval=1, max_keep_ckpts=10)
 
 log_config = dict(
-    interval=1,
+    interval=50,
     hooks=[
         dict(type='TextLoggerHook'),
         dict(type='TensorboardLoggerHook')

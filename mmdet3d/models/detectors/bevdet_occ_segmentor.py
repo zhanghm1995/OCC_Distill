@@ -624,7 +624,7 @@ class BEVStereo4DOCCSegmentorDense(BEVStereo4D):
                  loss_occ=None,
                  out_dim=32,
                  use_mask=False,
-                 num_classes=18,
+                 num_classes=17,
                  use_predicter=True,
                  class_wise=False,
                  scene_filter_index=-1,
@@ -703,9 +703,8 @@ class BEVStereo4DOCCSegmentorDense(BEVStereo4D):
         self.class_wise = class_wise
         self.align_after_view_transfromation = False
 
-    def loss_single(self, voxel_semantics, mask_camera, preds, semi_mask):
+    def loss_single(self, voxel_semantics, mask_camera, preds):
         loss_ = dict()
-        mask_camera *= semi_mask.unsqueeze(1).unsqueeze(1).unsqueeze(1)
         voxel_semantics = voxel_semantics.long()
         if self.use_mask:
             mask_camera = mask_camera.to(torch.int32)
@@ -801,13 +800,7 @@ class BEVStereo4DOCCSegmentorDense(BEVStereo4D):
     def forward_train(self,
                       points=None,
                       img_metas=None,
-                      gt_bboxes_3d=None,
-                      gt_labels_3d=None,
-                      gt_labels=None,
-                      gt_bboxes=None,
                       img_inputs=None,
-                      proposals=None,
-                      gt_bboxes_ignore=None,
                       **kwargs):
         """Forward training function.
 
@@ -822,13 +815,12 @@ class BEVStereo4DOCCSegmentorDense(BEVStereo4D):
         pose_spatial = kwargs['pose_spatial']
         batch_size = len(semi_mask)
         flip_dx, flip_dy = kwargs['flip_dx'], kwargs['flip_dy']
+        
         losses = dict()
         loss_depth = self.img_view_transformer.get_depth_loss(
             gt_depth.view(batch_size, 6, -1, *gt_depth.shape[2:])[:, :, 0],
             depth)
         losses['loss_depth'] = loss_depth
-        render_img_gt = kwargs['render_gt_img']
-        render_gt_depth = kwargs['render_gt_depth']
 
         # occupancy prediction
         occ_pred = self.final_conv(img_feats[0]).permute(0, 1, 4, 3, 2)
@@ -874,7 +866,7 @@ class BEVStereo4DOCCSegmentorDense(BEVStereo4D):
 
         # occupancy losses
         occ_pred = self.inverse_flip_aug(occ_pred, flip_dx, flip_dy)
-        loss_occ = self.loss_single(voxel_semantics, mask_camera, occ_pred, semi_mask)
+        loss_occ = self.loss_single(voxel_semantics, mask_camera, occ_pred)
         losses.update(loss_occ)
 
         return losses
