@@ -457,6 +457,7 @@ class MyBEVStereo4DOCCNeRF(BEVStereo4D):
             losses['loss_nerf'] = loss_nerf
 
             internal_feats_dict['render_mask'] = render_mask
+            internal_feats_dict['depth_mask'] = render_gt_depth > 0.0
 
             if self.NeRFDecoder.semantic_head:
                 img_semantic = kwargs['img_semantic']
