@@ -161,7 +161,8 @@ def merge_student_teacher_model(student_file_name,
 if __name__ == "__main__":
     student_filename = "exps/bevdet-dev2.1/bevdet-stbase-4d-stereo-512x1408-cbgs.pth"
     teacher_filename = "work_dirs/bevdet-fusion-occ-r50-4d-stereo-24e-fix/epoch_24_ema.pth"
-    save_path = "bevdet-stbase-4d-stereo-512x1408-cbgs-as-student-bevdet-fusion-occ-r50-as-teacher.pth"
+    teacher_filename = "work_dirs/aaai-bevdet-fusion-occ-r50-4d-stereo-512x1408-24e/epoch_23_ema.pth"
+    save_path = "bevdet-stbase-4d-stereo-512x1408-cbgs-as-student-bevdet-fusion-occ-r50-512x1408-as-teacher.pth"
     main_merge_student_teacher_models(student_filename, 
                                       teacher_filename,
                                       stu_prefix="student_model",

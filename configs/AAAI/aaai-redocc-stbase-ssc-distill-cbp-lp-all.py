@@ -21,11 +21,11 @@ data_config = {
     ],
     'Ncams':
     6,
-    'input_size': (256, 704),
+    'input_size': (512, 1408),
     # 'input_size': (224, 352), # SMALL FOR DEBUG
     'src_size': (900, 1600),
     # 'render_size': (90, 160), # SMALL FOR DEBUG
-    'render_size': (256, 704),
+    'render_size': (384, 704),
 
     # Augmentation
     'resize': (-0.06, 0.11),
@@ -52,9 +52,11 @@ multi_adj_frame_id_cfg = (1, 1 + 1, 1)
 
 ## =========== The teacher model ==============
 teacher_model = dict(
-    type='BEVFusionStereo4DOCC',
+    type='BEVFusionStereo4DOCCNeRF',
     align_after_view_transfromation=False,
     num_adj=len(range(*multi_adj_frame_id_cfg)),
+    return_weights=True,
+
     img_backbone=dict(
         type='ResNet',
         depth=50,
@@ -138,6 +140,25 @@ teacher_model = dict(
         upsample_strides=[1, 2, 4],
         out_channels=[128, 128, 128]),
     
+    nerf_head=dict(
+        type='NeRFDecoderHead',
+        mask_render=True,
+        img_recon_head=False,
+        semantic_head=True,
+        semantic_dim=17,
+        real_size=grid_config['x'][:2] + grid_config['y'][:2] + grid_config['z'][:2],
+        stepsize=grid_config['depth'][2],
+        voxels_size=voxel_resolution,
+        mode='bilinear',  # ['bilinear', 'nearest']
+        render_type='density',  # ['prob', 'density']
+        # render_size=data_config['input_size'],
+        render_size=data_config['render_size'],
+        depth_range=grid_config['depth'][:2],
+        loss_nerf_weight=0.5,
+        depth_loss_type='silog',  # ['silog', 'l1', 'rl1', 'sml1']
+        variance_focus=0.85,  # only for silog loss
+    ),
+
     loss_occ=dict(
         type='CrossEntropyLoss',
         use_sigmoid=False,
@@ -255,7 +276,12 @@ model = dict(
         use_depth_align=True,
         depth_align_loss=dict(
             type='KnowledgeDistillationKLDivLoss', 
-            loss_weight=1.0))
+            loss_weight=1.0),
+        use_occ_logits_align=True,
+        occ_logits_align_loss=dict(
+            type='KnowledgeDistillationKLDivLoss', 
+            loss_weight=0.1),
+        use_semantic_align=True,)
 )
 
 # Data
@@ -267,8 +293,7 @@ bda_aug_conf = dict(
     rot_lim=(-0., 0.),
     scale_lim=(1., 1.),
     flip_dx_ratio=0.5,
-    flip_dy_ratio=0.5,
-)
+    flip_dy_ratio=0.5)
 
 train_pipeline = [
     dict(
@@ -304,7 +329,7 @@ train_pipeline = [
                                 'intricics', 'pose_spatial', 
                                 'flip_dx', 'flip_dy', 
                                 'render_gt_img', 'render_gt_depth',
-                                'mask_lidar','mask_camera'])
+                                'mask_camera'])
 ]
 
 test_pipeline = [
@@ -362,7 +387,7 @@ test_data_config = dict(
     ann_file=data_root + 'bevdetv3-lidarseg-nuscenes_infos_val.pkl')
 
 data = dict(
-    samples_per_gpu=4,
+    samples_per_gpu=2,
     workers_per_gpu=8,
     train=dict(
         data_root=data_root,
@@ -420,4 +445,4 @@ log_config = dict(
     ])
 checkpoint_config = dict(interval=2, max_keep_ckpts=10)
 
-load_from = "bevdet-stbase-4d-stereo-512x1408-cbgs-as-student-bevdet-fusion-occ-r50-as-teacher.pth"
+load_from = "bevdet-stbase-4d-stereo-512x1408-cbgs-as-student-bevdet-fusion-occ-r50-512x1408-as-teacher.pth"
