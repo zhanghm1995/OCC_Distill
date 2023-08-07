@@ -420,7 +420,6 @@ class MyBEVLidarOCCNeRF(CenterPoint):
         intricics = kwargs['intricics']
         pose_spatial = kwargs['pose_spatial']
         flip_dx, flip_dy = kwargs['flip_dx'], kwargs['flip_dy']
-        render_img_gt = kwargs['render_gt_img']
         render_gt_depth = kwargs['render_gt_depth']
 
         ## we use the internal_feats_dict to store the intermediate
@@ -457,12 +456,12 @@ class MyBEVLidarOCCNeRF(CenterPoint):
         density_prob_flip = self.inverse_flip_aug(density_prob, flip_dx, flip_dy)
 
         # random view selection
+        rand_ind = None
         if self.num_random_view != -1:
             rand_ind = torch.multinomial(torch.tensor([1/self.num_random_view]*self.num_random_view), self.num_random_view, replacement=False)
             intricics = intricics[:, rand_ind]
             pose_spatial = pose_spatial[:, rand_ind]
             render_gt_depth = render_gt_depth[:, rand_ind]
-            render_img_gt = render_img_gt[:, rand_ind]
 
         # rendering
         # import time
