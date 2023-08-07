@@ -447,9 +447,10 @@ class MyBEVStereo4DOCCNeRF(BEVStereo4D):
             
             # end = time.time()
             # print("inference time:", end - start)
-
+            render_gt_depth = render_gt_depth[render_mask]
+            internal_feats_dict['depth_mask'] = render_gt_depth > 0.0
+            
             if self.use_nerf_loss:
-                render_gt_depth = render_gt_depth[render_mask]
                 loss_nerf = self.NeRFDecoder.compute_depth_loss(
                     render_depth, render_gt_depth, render_gt_depth > 0.0)
                 if torch.isnan(loss_nerf):

@@ -42,6 +42,6 @@ __all__ = [
     'BEVFusionStereo4DSSCOCC', 'BEVStereo4DOCCPretrain', 'MyBEVStereo4DOCCNeRF',
     'MyBEVStereo4DOCCNeRFV1', 'MyBEVLidarOCCNeRF',
     'MyBEVLidarDistillCameraOCCNeRF', 'BEVStereo4DOCCSegmentor',
-    'BEVStereo4DSSCOCCNeRF', 'BEVFusionStereo4DOCCNeRF'
+    'BEVStereo4DSSCOCCNeRF', 'BEVFusionStereo4DOCCNeRF',
     'BEVStereo4DOCCSegmentorDense'
 ]
