@@ -206,7 +206,7 @@ model = dict(
         use_depth_align=True,
         depth_align_loss=dict(
             type='KnowledgeDistillationKLDivLoss', 
-            loss_weight=1.0))
+            loss_weight=1000.0))
 )
 
 # Data

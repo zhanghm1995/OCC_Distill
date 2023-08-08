@@ -52,12 +52,13 @@ def sample_camera_images(anno_file, save_root=None):
         dataset = pickle.load(fp)
     
     data_infos = dataset['infos']
-
-    info = data_infos[10]
+    
+    sample_idx = np.random.randint(6019)
+    info = data_infos[sample_idx]
+    
     cam_names = info['cams']
     for cam_name in cam_names:
         cam_data = cam_names[cam_name]
-        print(cam_data)
         filename = cam_data['data_path']
         cam_token = cam_data['sample_data_token']
         print(filename, cam_token)
@@ -71,11 +72,12 @@ def sample_camera_images(anno_file, save_root=None):
             os.makedirs(cam_dir, exist_ok=True)
 
             # copy the camera image to the directory
-            cam_img_path = osp.join(cam_dir, f"{cam_token}_image.jpg")
+            dst_file_name = osp.splitext(osp.basename(filename))[0]
+            cam_img_path = osp.join(cam_dir, f"{dst_file_name}_image_{sample_idx}.jpg")
             os.system(f"cp {filename} {cam_img_path}")
 
             # copy the semantic mask to the directory
-            sam_mask_dst_path = osp.join(cam_dir, f"{cam_token}_mask.png")
+            sam_mask_dst_path = osp.join(cam_dir, f"{dst_file_name}_mask.png")
             os.system(f"cp {sam_mask_path} {sam_mask_dst_path}")
 
 
@@ -89,11 +91,34 @@ def read_sam_mask():
     print(img.shape, img.dtype, np.unique(img), img.min(), img.max())
 
 
+def save_point_cloud(anno_file, sample_idx: int = None):
+    with open(anno_file, "rb") as fp:
+        dataset = pickle.load(fp)
+    
+    data_infos = dataset['infos']
+    
+    if sample_idx is None:
+        sample_idx = np.random.randint(6019)
+    info = data_infos[sample_idx]
+
+    points_path = info['lidar_path']
+    points = np.fromfile(points_path, dtype=np.float32).reshape(-1, 5)
+    print(points.shape)
+
+    save_path = "./pts_2162.xyz"
+    np.savetxt(save_path, points[:, :3])
+
+
 if __name__ == "__main__":
+    # pickle_path = "data/nuscenes/bevdetv3-lidarseg-nuscenes_infos_train.pkl"
+    pickle_path = "data/nuscenes/bevdetv3-lidarseg-nuscenes_infos_val.pkl"
+    save_point_cloud(pickle_path, sample_idx=2162)
+    exit()
+    sample_camera_images(pickle_path, save_root="./debug")
+    exit()
     read_sam_mask()
     exit()
-    pickle_path = "data/nuscenes/bevdetv3-lidarseg-nuscenes_infos_train.pkl"
-    sample_camera_images(pickle_path, save_root="./debug")
+    
     exit(0)
     load_pickle(pickle_path)
 
