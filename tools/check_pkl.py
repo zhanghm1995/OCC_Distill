@@ -12,6 +12,7 @@ from PIL import Image
 import os
 import os.path as osp
 import numpy as np
+from tqdm import tqdm
 
 
 def load_pickle(pickle_file_path):
@@ -41,7 +42,9 @@ def load_pickle(pickle_file_path):
             break
 
 
-def sample_camera_images(anno_file, save_root=None):
+def sample_camera_images(anno_file, 
+                         sample_idx=None, 
+                         save_root=None):
     """Sample the camera images from the dataset and save them to the directory.
 
     Args:
@@ -53,15 +56,17 @@ def sample_camera_images(anno_file, save_root=None):
     
     data_infos = dataset['infos']
     
-    sample_idx = np.random.randint(6019)
+    if sample_idx is None:
+        sample_idx = np.random.randint(6019)
     info = data_infos[sample_idx]
+    print(sample_idx)
     
     cam_names = info['cams']
     for cam_name in cam_names:
         cam_data = cam_names[cam_name]
         filename = cam_data['data_path']
         cam_token = cam_data['sample_data_token']
-        print(filename, cam_token)
+        # print(filename, cam_token)
         sam_mask_path = osp.join("./data/nuscenes/superpixels_sam", 
                                  f"{cam_token}.png")
 
@@ -79,6 +84,37 @@ def sample_camera_images(anno_file, save_root=None):
             # copy the semantic mask to the directory
             sam_mask_dst_path = osp.join(cam_dir, f"{dst_file_name}_mask.png")
             os.system(f"cp {sam_mask_path} {sam_mask_dst_path}")
+
+
+def save_all_cam_images(anno_file, save_root=None):
+    with open(anno_file, "rb") as fp:
+        dataset = pickle.load(fp)
+    
+    data_infos = dataset['infos']
+
+    data_infos = list(sorted(data_infos, key=lambda e: e['timestamp']))
+    
+    for idx, info in tqdm(enumerate(data_infos)):
+        cam_names = info['cams']
+        for cam_name in cam_names:
+            if cam_name != 'CAM_FRONT':
+                continue
+            cam_data = cam_names[cam_name]
+            filename = cam_data['data_path']
+            cam_token = cam_data['sample_data_token']
+            sam_mask_path = osp.join("./data/nuscenes/superpixels_sam", 
+                                    f"{cam_token}.png")
+
+            if save_root is not None:
+                # create the camera image directory
+                os.makedirs(save_root, exist_ok=True)
+                cam_dir = osp.join(save_root, cam_name)
+                os.makedirs(cam_dir, exist_ok=True)
+
+                # copy the camera image to the directory
+                dst_file_name = osp.splitext(osp.basename(filename))[0]
+                cam_img_path = osp.join(cam_dir, f"{idx}_{dst_file_name}.jpg")
+                os.system(f"cp {filename} {cam_img_path}")
 
 
 def read_sam_mask():
@@ -105,17 +141,22 @@ def save_point_cloud(anno_file, sample_idx: int = None):
     points = np.fromfile(points_path, dtype=np.float32).reshape(-1, 5)
     print(points.shape)
 
-    save_path = "./pts_2162.xyz"
+    save_path = f"./pts_{sample_idx}.xyz"
     np.savetxt(save_path, points[:, :3])
 
 
 if __name__ == "__main__":
     # pickle_path = "data/nuscenes/bevdetv3-lidarseg-nuscenes_infos_train.pkl"
     pickle_path = "data/nuscenes/bevdetv3-lidarseg-nuscenes_infos_val.pkl"
-    save_point_cloud(pickle_path, sample_idx=2162)
+    save_all_cam_images(pickle_path, save_root="./aaai_all_validation_sorted")
+    exit(0)
+    save_point_cloud(pickle_path, sample_idx=3827)
     exit()
-    sample_camera_images(pickle_path, save_root="./debug")
+    sample_camera_images(pickle_path, sample_idx=3827, save_root="./aaai_figure")
     exit()
+    
+    
+    
     read_sam_mask()
     exit()
     

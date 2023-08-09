@@ -12,6 +12,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 import cv2
+import time
 from mmdet3d.models.builder import HEADS
 from mmdet3d.models.losses.lovasz_loss import lovasz_softmax
 
@@ -514,6 +515,51 @@ class NeRFDecoderHead(nn.Module):
         # plt.show()
         plt.savefig("lidar_occ_nerf_render_infer_error.png")
 
+
+    def visualize_image_semantic_depth_pair(self, 
+                                            images, 
+                                            semantic, 
+                                            render, 
+                                            save=False):
+        '''
+        This is a debug function!!
+        Args:
+            images: num_camera, 3, H, W
+            semantic: num_camera, H, W
+            render: num_camera, H, W
+        '''
+        import matplotlib.pyplot as plt
+
+        concated_render_list = []
+        concated_image_list = []
+        semantic = semantic.cpu().numpy()
+        render = render.cpu().numpy()
+
+        for b in range(len(images)):
+            visual_img = cv2.resize(images[b].transpose((1, 2, 0)), (semantic.shape[-2], semantic.shape[-3]))
+            img_mean = np.array([0.485, 0.456, 0.406])[None, None, :]
+            img_std = np.array([0.229, 0.224, 0.225])[None, None, :]
+            visual_img = np.ascontiguousarray((visual_img * img_std + img_mean))
+            concated_image_list.append(visual_img)
+            pred_depth_color = visualize_depth(render[b])
+            pred_depth_color = pred_depth_color[..., [2, 1, 0]]
+            concated_render_list.append(cv2.resize(pred_depth_color.copy(), (semantic.shape[-2], semantic.shape[-3])))
+
+        fig, ax = plt.subplots(nrows=6, ncols=3, figsize=(6, 6))
+        ij = [[i, j] for i in range(2) for j in range(3)]
+        for i in range(len(ij)):
+            ax[ij[i][0], ij[i][1]].imshow(concated_image_list[i])
+            ax[ij[i][0] + 2, ij[i][1]].imshow(semantic[i]/255)
+            ax[ij[i][0] + 4, ij[i][1]].imshow(concated_render_list[i]/255)
+
+            for j in range(3):
+                ax[i, j].axis('off')
+
+        plt.subplots_adjust(wspace=0.01, hspace=0.01)
+        if not save:
+            plt.show()
+        else:
+            plt.savefig('%f.png' % time.time())
 
 if __name__ == '__main__':
     import time

@@ -209,8 +209,9 @@ model = dict(
         use_occ_logits_align=True,
         occ_logits_align_loss=dict(
             type='KnowledgeDistillationKLDivLoss', 
-            loss_weight=1.0),
-        use_semantic_align=True,)
+            loss_weight=10.0),
+        use_semantic_align=True,
+        loss_semantic_align_weight=10.0,)
 )
 
 # Data
