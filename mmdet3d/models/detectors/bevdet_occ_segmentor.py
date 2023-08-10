@@ -15,7 +15,7 @@ from mmdet.models import DETECTORS
 from mmdet.models.builder import build_loss
 from mmcv.cnn.bricks.conv_module import ConvModule
 from torch import nn
-from mmdet3d.models.losses.lovasz_loss import Lovasz_loss
+from mmdet3d.models.losses.lovasz_loss import Lovasz_loss, lovasz_softmax
 from .. import builder
 from .bevdet import BEVStereo4D
 from mmdet3d.models.detectors.bevdet_occ_ssc import SSCNet
@@ -632,6 +632,7 @@ class BEVStereo4DOCCSegmentorDense(BEVStereo4D):
                  coors_range_xyz=None,
                  spatial_shape=None,
                  max_ray_number=80000,
+                 use_empty_voxel_loss=False,
                  **kwargs):
         super(BEVStereo4DOCCSegmentorDense, self).__init__(**kwargs)
         self.out_dim = out_dim
@@ -640,6 +641,8 @@ class BEVStereo4DOCCSegmentorDense(BEVStereo4D):
         self.num_classes = num_classes
         self.coors_range_xyz = coors_range_xyz
         self.spatial_shape = spatial_shape
+        # whether consider the empty voxels loss
+        self.use_empty_voxel_loss = use_empty_voxel_loss
 
         if nerf_head is not None:
             self.NeRFDecoder = builder.build_backbone(nerf_head)
@@ -712,7 +715,11 @@ class BEVStereo4DOCCSegmentorDense(BEVStereo4D):
             preds = preds.reshape(-1, self.num_classes)
             mask_camera = mask_camera.reshape(-1)
             num_total_samples = mask_camera.sum()
-            loss_occ = self.loss_occ(preds, voxel_semantics, mask_camera, avg_factor=num_total_samples)
+            loss_occ = self.loss_occ(preds, voxel_semantics, 
+                                     mask_camera, 
+                                     avg_factor=num_total_samples)
+            if self.use_empty_voxel_loss:
+                loss_occ += lovasz_softmax(preds, voxel_semantics, ignore=17)
             loss_['loss_occ'] = loss_occ
         else:
             voxel_semantics = voxel_semantics.reshape(-1)
@@ -858,11 +865,17 @@ class BEVStereo4DOCCSegmentorDense(BEVStereo4D):
         voxel_lidarseg_label = voxel_lidarseg_label.scatter(0, unq_inv, lidarseg_label)
 
         # generate voxel label and mask
-        voxel_semantics = torch.zeros_like(occ_pred.argmax(-1)).detach()
-        mask_camera = torch.zeros_like(occ_pred.argmax(-1)).detach()
-        voxel_semantics[unq[:, 0], unq[:, 1], unq[:, 2], unq[:, 3]] = voxel_lidarseg_label.long()
-        mask_camera[unq[:, 0], unq[:, 1], unq[:, 2], unq[:, 3]] = 1
-        mask_camera[voxel_semantics == 0] = 0
+        if self.use_empty_voxel_loss:
+            voxel_semantics = torch.ones_like(occ_pred.argmax(-1)).detach()
+            voxel_semantics = voxel_semantics * 17
+            mask_camera = torch.ones_like(occ_pred.argmax(-1)).detach()
+            voxel_semantics[unq[:, 0], unq[:, 1], unq[:, 2], unq[:, 3]] = voxel_lidarseg_label.long()
+        else:
+            voxel_semantics = torch.zeros_like(occ_pred.argmax(-1)).detach()
+            mask_camera = torch.zeros_like(occ_pred.argmax(-1)).detach()
+            voxel_semantics[unq[:, 0], unq[:, 1], unq[:, 2], unq[:, 3]] = voxel_lidarseg_label.long()
+            mask_camera[unq[:, 0], unq[:, 1], unq[:, 2], unq[:, 3]] = 1
+            mask_camera[voxel_semantics == 0] = 0
 
         # occupancy losses
         occ_pred = self.inverse_flip_aug(occ_pred, flip_dx, flip_dy)
