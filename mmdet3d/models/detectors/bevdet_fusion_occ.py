@@ -15,6 +15,7 @@ from mmdet.core import multi_apply
 
 from .. import builder
 from .bevdet_occ import BEVFusionStereo4DOCC
+from .bevdet_occ_nerf_S_visualizer import NeRFVisualizer
 
 
 def merge_aug_occs(aug_occ_list):
@@ -52,7 +53,7 @@ class BEVFusionStereo4DOCCNeRF(BEVFusionStereo4DOCC):
         self.num_random_view = self.NeRFDecoder.num_random_view
 
         ## NOTE: here we assume do not rendering the image
-        assert not self.NeRFDecoder.img_recon_head
+        # assert not self.NeRFDecoder.img_recon_head
         
     def simple_test(self,
                     points,
@@ -69,6 +70,32 @@ class BEVFusionStereo4DOCCNeRF(BEVFusionStereo4DOCC):
             occ_pred = self.predicter(occ_pred)
         occ_score=occ_pred.softmax(-1)
         occ_res=occ_score.argmax(-1)
+        
+
+        VISUALIZE = True
+        if VISUALIZE:
+            intricics = kwargs['intricics'][0]
+            pose_spatial = kwargs['pose_spatial'][0]
+            render_img_gt = kwargs['render_gt_img'][0]
+            flip_dx = [False]
+            flip_dy = [False]
+            voxel_semantics = kwargs['voxel_semantics'][0]
+
+            visualizer = NeRFVisualizer()
+            # visualizer.visualize_pred_occ(self.NeRFDecoder, 
+            #                               self.num_frame,
+            #                               occ_pred,
+            #                               render_img_gt,
+            #                               intricics, 
+            #                               flip_dx, 
+            #                               flip_dy,
+            #                               pose_spatial)
+            visualizer.visualize_gt_occ(self.NeRFDecoder, self.num_frame,
+                                        occ_res,
+                                        render_img_gt, flip_dx, flip_dy,
+                                        intricics, pose_spatial)
+            exit()
+        
         occ_res = occ_res.squeeze(dim=0).cpu().numpy().astype(np.uint8)
         return [occ_res]
     

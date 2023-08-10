@@ -88,10 +88,10 @@ class NeRFVisualizer(object):
                            num_frame,
                            occ_pred,
                            render_img_gt,
-                           intricics, 
-                           pose_spatial,
                            flip_dx, 
-                           flip_dy):
+                           flip_dy,
+                           intricics, 
+                           pose_spatial):
         """_summary_
 
         Args:
@@ -129,15 +129,15 @@ class NeRFVisualizer(object):
             density_prob_flip,
             sem_color_flip,
             density_prob_flip.tile(1, nerf_head.semantic_dim, 1, 1, 1),
-            intricics, pose_spatial, True
-        )
+            intricics, pose_spatial, True)
         
         print('density_prob', density_prob.shape)  # [1, 1, 200, 200, 16]
         print('render_depth', render_depth.shape, render_depth.max(), render_depth.min())  # [1, 6, 224, 352]
+
+        # to (6, 3, h, w)
         current_frame_img = render_img_gt.view(
             batch_size, 6, num_frame, -1, 
             render_img_gt.shape[-2], render_img_gt.shape[-1])[0, :, 0].cpu().numpy()
-        print(current_frame_img.shape)
 
         ## visualize the depth map and semantic map
         nerf_head.visualize_image_semantic_depth_pair(
@@ -301,7 +301,6 @@ class MyBEVStereo4DOCCNeRFVisualizer(BEVStereo4D):
 
         occ_score = occ_pred.softmax(-1)
         occ_res = occ_score.argmax(-1)
-        occ_res = occ_res.squeeze(dim=0).cpu().numpy().astype(np.uint8)
 
         ## nerf
         VISUALIZE = True
@@ -313,12 +312,12 @@ class MyBEVStereo4DOCCNeRFVisualizer(BEVStereo4D):
             flip_dy = [False]
 
             visualizer = NeRFVisualizer()
-            visualizer.visualize_pred_occ(self.NeRFDecoder, 
-                                          self.num_frame,
-                                          occ_pred,
-                                          render_img_gt,
-                                          intricics, pose_spatial,
-                                          flip_dx, flip_dy)
+            visualizer.visualize_gt_occ(self.NeRFDecoder, 
+                                        self.num_frame,
+                                        occ_res,
+                                        render_img_gt,
+                                        flip_dx, flip_dy,
+                                        intricics, pose_spatial)
             exit()
 
             # to (b, c, 200, 200, 16)
@@ -371,6 +370,7 @@ class MyBEVStereo4DOCCNeRFVisualizer(BEVStereo4D):
                 render_depth[0],
                 save=True
             )
+        occ_res = occ_res.squeeze(dim=0).cpu().numpy().astype(np.uint8)
         return [occ_res]
 
     @staticmethod

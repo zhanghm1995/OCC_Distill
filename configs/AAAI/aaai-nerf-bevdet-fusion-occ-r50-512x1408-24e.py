@@ -26,8 +26,8 @@ data_config = {
     'input_size': (512, 1408),
     # 'input_size': (224, 352), # SMALL FOR DEBUG
     'src_size': (900, 1600),
-    # 'render_size': (90, 160), # SMALL FOR DEBUG
-    'render_size': (384, 704),
+    'render_size': (90, 160), # SMALL FOR DEBUG
+    # 'render_size': (384, 704),
 
     # Augmentation
     'resize': (-0.06, 0.11),
@@ -141,15 +141,15 @@ model = dict(
     
     nerf_head=dict(
         type='NeRFDecoderHead',
-        mask_render=True,
-        img_recon_head=False,
+        mask_render=False,
+        img_recon_head=True,
         semantic_head=True,
         semantic_dim=17,
         real_size=grid_config['x'][:2] + grid_config['y'][:2] + grid_config['z'][:2],
         stepsize=grid_config['depth'][2],
         voxels_size=voxel_resolution,
-        mode='bilinear',  # ['bilinear', 'nearest']
-        render_type='density',  # ['prob', 'density']
+        mode='nearest',  # ['bilinear', 'nearest']
+        render_type='prob',  # ['prob', 'density']
         # render_size=data_config['input_size'],
         render_size=data_config['render_size'],
         depth_range=grid_config['depth'][:2],
@@ -217,6 +217,7 @@ test_pipeline = [
         type='PrepareImageInputsForNeRF',
         data_config=data_config,
         sequential=True),
+    dict(type='LoadOccGTFromFile'),
     dict(
         type='LoadAnnotationsBEVDepth',
         bda_aug_conf=bda_aug_conf,
@@ -228,6 +229,10 @@ test_pipeline = [
         load_dim=5,
         use_dim=[0,1,2,4],
         file_client_args=file_client_args),
+    dict(type='PointToMultiViewDepthForNeRF', downsample=1, grid_config=grid_config, 
+         render_size=data_config['render_size'],
+         render_scale=[data_config['render_size'][0]/data_config['src_size'][0], 
+                       data_config['render_size'][1]/data_config['src_size'][1]]),
     dict(type='PointToEgo'),
     dict(type='PointsConditionalFlip'),
     dict(
@@ -241,7 +246,10 @@ test_pipeline = [
                 type='DefaultFormatBundle3D',
                 class_names=class_names,
                 with_label=False),
-            dict(type='Collect3D', keys=['points', 'img_inputs'])
+            dict(type='Collect3D', keys=['points', 'img_inputs',
+                                         'voxel_semantics',
+                                         'intricics', 'pose_spatial',
+                                         'render_gt_img',])
         ])
 ]
 
@@ -264,8 +272,7 @@ share_data_config = dict(
 
 test_data_config = dict(
     pipeline=test_pipeline,
-    ann_file=data_root + 'bevdetv3-lidarseg-nuscenes_infos_val.pkl',
-    load_interval=250)
+    ann_file=data_root + 'bevdetv3-lidarseg-nuscenes_infos_val.pkl')
 
 data = dict(
     samples_per_gpu=2,
