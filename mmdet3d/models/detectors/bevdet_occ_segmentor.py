@@ -758,7 +758,7 @@ class BEVStereo4DOCCSegmentorDense(BEVStereo4D):
         pc_seg[mask] = point_pred
 
         # ignore free category and then conduct softmax
-        occ_score = pc_seg.softmax(-1)
+        occ_score = pc_seg[:, :17].softmax(-1)
         occ_res = occ_score.argmax(-1)
         occ_res = occ_res.cpu().numpy().astype(np.uint8)
 
