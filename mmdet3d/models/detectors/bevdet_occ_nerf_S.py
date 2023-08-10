@@ -719,7 +719,6 @@ class BEVStereo4DSSCOCCNeRF(BEVStereo4D):
             points, img=img, img_metas=img_metas, **kwargs)
         occ_pred = self.final_conv(img_feats[0]).permute(0, 4, 3, 2, 1)
 
-        # bncdhw->bnwhdc
         if self.use_predicter:
             occ_pred = self.predicter(occ_pred)
 
@@ -750,13 +749,7 @@ class BEVStereo4DSSCOCCNeRF(BEVStereo4D):
     def forward_train(self,
                       points=None,
                       img_metas=None,
-                      gt_bboxes_3d=None,
-                      gt_labels_3d=None,
-                      gt_labels=None,
-                      gt_bboxes=None,
                       img_inputs=None,
-                      proposals=None,
-                      gt_bboxes_ignore=None,
                       **kwargs):
         """Forward training function.
 

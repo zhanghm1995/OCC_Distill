@@ -430,7 +430,6 @@ class Custom3DDataset(Dataset):
             dict: Data dictionary of the corresponding index.
         """
         if self.test_mode:
-            idx = 26
             return self.prepare_test_data(idx)
         while True:
             data = self.prepare_train_data(idx)
