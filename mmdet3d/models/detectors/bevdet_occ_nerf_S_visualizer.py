@@ -42,6 +42,157 @@ NUSCENSE_LIDARSEG_PALETTE = torch.Tensor([
     (0, 0, 0), # ignore
 ])
 
+
+def inverse_flip_aug(feat, flip_dx, flip_dy):
+    batch_size = feat.shape[0]
+    feat_flip = []
+    for b in range(batch_size):
+        flip_flag_x = flip_dx[b]
+        flip_flag_y = flip_dy[b]
+        tmp = feat[b]
+        if flip_flag_x:
+            tmp = tmp.flip(1)
+        if flip_flag_y:
+            tmp = tmp.flip(2)
+        feat_flip.append(tmp)
+    feat_flip = torch.stack(feat_flip)
+    return feat_flip
+
+
+class NeRFVisualizer(object):
+
+    def __init__(self):
+        self.NUSCENSE_LIDARSEG_PALETTE = torch.Tensor([
+            (0, 0, 0),  # noise
+            (112, 128, 144),  # barrier
+            (220, 20, 60),  # bicycle
+            (255, 127, 80),  # bus
+            (255, 158, 0),  # car
+            (233, 150, 70),  # construction_vehicle
+            (255, 61, 99),  # motorcycle
+            (0, 0, 230),  # pedestrian
+            (47, 79, 79),  # traffic_cone
+            (255, 140, 0),  # trailer
+            (255, 99, 71),  # Tomato
+            (0, 207, 191),  # nuTonomy green
+            (175, 0, 75),
+            (75, 0, 75),
+            (112, 180, 60),
+            (222, 184, 135),  # Burlywood
+            (0, 175, 0),
+            (0, 0, 0), # ignore
+        ])
+    
+    def visualize_pred_occ(self,
+                           nerf_head, 
+                           num_frame,
+                           occ_pred,
+                           render_img_gt,
+                           intricics, 
+                           pose_spatial,
+                           flip_dx, 
+                           flip_dy):
+        """_summary_
+
+        Args:
+            nerf_head (_type_): _description_
+            num_frame (_type_): _description_
+            occ_pred (_type_): (b, 200, 200, 16, 18)
+            render_img_gt (_type_): _description_
+            flip_dx (_type_): _description_
+            flip_dy (_type_): _description_
+            intricics (_type_): _description_
+            pose_spatial (_type_): _description_
+        """
+        # to (b, 18, 200, 200, 16)
+        occ_pred = occ_pred.permute(0, 4, 1, 2, 3)
+        batch_size = occ_pred.shape[0]
+
+        occ_score = occ_pred.softmax(1)
+        voxel_semantics = occ_score.argmax(1)  # to (b, 200, 200, 16)
+
+        # to (b, 1, 200, 200, 16)
+        voxel_semantics = voxel_semantics.unsqueeze(1)
+
+        density_prob = -occ_pred[:, 17:18]  # (b, 1, 200, 200, 16)
+        density_prob_flip = inverse_flip_aug(
+            density_prob, flip_dx, flip_dy)
+
+        # to (b, 1, 200, 200, 16, 3)
+        sem_color = self.NUSCENSE_LIDARSEG_PALETTE[voxel_semantics.long()].cuda()
+        sem_color_flip = inverse_flip_aug(
+            sem_color, flip_dx, flip_dy).permute(0, 1, 5, 2, 3, 4)[:, 0]
+        print(sem_color.shape, sem_color_flip.shape)
+
+        # nerf decoder
+        render_depth, render_color, _ = nerf_head(
+            density_prob_flip,
+            sem_color_flip,
+            density_prob_flip.tile(1, nerf_head.semantic_dim, 1, 1, 1),
+            intricics, pose_spatial, True
+        )
+        
+        print('density_prob', density_prob.shape)  # [1, 1, 200, 200, 16]
+        print('render_depth', render_depth.shape, render_depth.max(), render_depth.min())  # [1, 6, 224, 352]
+        current_frame_img = render_img_gt.view(
+            batch_size, 6, num_frame, -1, 
+            render_img_gt.shape[-2], render_img_gt.shape[-1])[0, :, 0].cpu().numpy()
+        print(current_frame_img.shape)
+
+        ## visualize the depth map and semantic map
+        nerf_head.visualize_image_semantic_depth_pair(
+            current_frame_img, 
+            render_color.permute(0, 1, 3, 4, 2)[0], 
+            render_depth[0],
+            save=True)
+        
+    def visualize_gt_occ(self,
+                         nerf_head, 
+                         num_frame,
+                         voxel_semantics,
+                         render_img_gt,
+                         flip_dx, flip_dy,
+                         intricics, pose_spatial):
+        # to (b, 1, 200, 200, 16)
+        voxel_semantics = voxel_semantics.unsqueeze(1)
+
+        density_prob = voxel_semantics != 17
+        density_prob = density_prob.float()
+        density_prob[density_prob == 0] = -10  # scaling to avoid 0 in alphas
+        density_prob[density_prob == 1] = 10
+        batch_size = density_prob.shape[0]
+        density_prob_flip = inverse_flip_aug(density_prob, flip_dx, flip_dy)
+        print(density_prob_flip.shape)
+
+        # to (b, 1, 200, 200, 16, 3)
+        sem_color = self.NUSCENSE_LIDARSEG_PALETTE[voxel_semantics.long()].cuda()
+        sem_color_flip = inverse_flip_aug(
+            sem_color, flip_dx, flip_dy).permute(0, 1, 5, 2, 3, 4)[:, 0]
+        print(sem_color.shape, sem_color_flip.shape)
+
+        # nerf decoder
+        render_depth, render_color, _ = nerf_head(
+            density_prob_flip,
+            sem_color_flip,
+            density_prob_flip.tile(1, nerf_head.semantic_dim, 1, 1, 1),
+            intricics, pose_spatial, True
+        )
+        
+        print('density_prob', density_prob.shape)  # [1, 1, 200, 200, 16]
+        print('render_depth', render_depth.shape, render_depth.max(), render_depth.min())  # [1, 6, 224, 352]
+        current_frame_img = render_img_gt.view(
+            batch_size, 6, num_frame, -1, 
+            render_img_gt.shape[-2], render_img_gt.shape[-1])[0, :, 0].cpu().numpy()
+        print(current_frame_img.shape)
+
+        ## visualize the depth map and semantic map
+        nerf_head.visualize_image_semantic_depth_pair(
+            current_frame_img, 
+            render_color.permute(0, 1, 3, 4, 2)[0], 
+            render_depth[0],
+            save=True)
+
+
 @DETECTORS.register_module()
 class MyBEVStereo4DOCCNeRFVisualizer(BEVStereo4D):
 
@@ -153,8 +304,23 @@ class MyBEVStereo4DOCCNeRFVisualizer(BEVStereo4D):
         occ_res = occ_res.squeeze(dim=0).cpu().numpy().astype(np.uint8)
 
         ## nerf
-        VISUALIZE = False
+        VISUALIZE = True
         if VISUALIZE:
+            intricics = kwargs['intricics'][0]
+            pose_spatial = kwargs['pose_spatial'][0]
+            render_img_gt = kwargs['render_gt_img'][0]
+            flip_dx = [False]
+            flip_dy = [False]
+
+            visualizer = NeRFVisualizer()
+            visualizer.visualize_pred_occ(self.NeRFDecoder, 
+                                          self.num_frame,
+                                          occ_pred,
+                                          render_img_gt,
+                                          intricics, pose_spatial,
+                                          flip_dx, flip_dy)
+            exit()
+
             # to (b, c, 200, 200, 16)
             use_gt_occ = False
 
@@ -262,6 +428,12 @@ class MyBEVStereo4DOCCNeRFVisualizer(BEVStereo4D):
         # NeRF loss
         if True:  # DEBUG ONLY!
             # to (b, 1, 200, 200, 16)
+            visualizer = NeRFVisualizer()
+            visualizer.visualize_gt_occ(self.NeRFDecoder, self.num_frame,
+                                        voxel_semantics,
+                                        render_img_gt, flip_dx, flip_dy,
+                                        intricics, pose_spatial)
+            exit()
             voxel_semantics = kwargs['voxel_semantics'].unsqueeze(1)
 
             density_prob = voxel_semantics != 17
