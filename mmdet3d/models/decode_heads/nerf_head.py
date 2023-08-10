@@ -248,7 +248,7 @@ class NeRFDecoderHead(nn.Module):
             if self.semantic_head:
                 semantic = self.grid_sampler(mask_rays_pts, semantic_recon)
                 B, N = rays_pts.shape[:2]
-                semantic_cache = torch.zeros((B, N, self.semantic_dim)).to(rays_pts.device)
+                semantic_cache = torch.zeros((B, N, semantic_recon.shape[0])).to(rays_pts.device)
                 semantic_cache[~mask_outbbox] = semantic  # 473088, 287, 3
                 semantic_marched = torch.sum(probs[..., None] * semantic_cache, -2)
             else:
@@ -273,7 +273,7 @@ class NeRFDecoderHead(nn.Module):
             if self.semantic_head:
                 semantic = self.grid_sampler(mask_rays_pts, semantic_recon)
                 B, N = rays_pts.shape[:2]
-                semantic_cache = torch.zeros((B, N, self.semantic_dim)).to(rays_pts.device)
+                semantic_cache = torch.zeros((B, N, semantic_recon.shape[0])).to(rays_pts.device)
                 semantic_cache[~mask_outbbox] = semantic  # 473088, 287, 3
                 semantic_marched = torch.sum(weights[..., None] * semantic_cache, -2)
             else:
@@ -525,7 +525,7 @@ class NeRFDecoderHead(nn.Module):
         This is a debug function!!
         Args:
             images: num_camera, 3, H, W
-            semantic: num_camera, H, W
+            semantic: num_camera, H, W, 3
             render: num_camera, H, W
         '''
         import matplotlib.pyplot as plt

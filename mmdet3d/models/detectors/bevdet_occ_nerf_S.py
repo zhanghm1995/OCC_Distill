@@ -21,6 +21,26 @@ from .bevdet import BEVStereo4D
 from .bevdet_occ_ssc import SSCNet
 
 
+NUSCENSE_LIDARSEG_PALETTE = torch.Tensor([
+    (0, 0, 0),  # noise
+    (112, 128, 144),  # barrier
+    (220, 20, 60),  # bicycle
+    (255, 127, 80),  # bus
+    (255, 158, 0),  # car
+    (233, 150, 70),  # construction_vehicle
+    (255, 61, 99),  # motorcycle
+    (0, 0, 230),  # pedestrian
+    (47, 79, 79),  # traffic_cone
+    (255, 140, 0),  # trailer
+    (255, 99, 71),  # Tomato
+    (0, 207, 191),  # nuTonomy green
+    (175, 0, 75),
+    (75, 0, 75),
+    (112, 180, 60),
+    (222, 184, 135),  # Burlywood
+    (0, 175, 0)
+])
+
 @DETECTORS.register_module()
 class MyBEVStereo4DOCCNeRF(BEVStereo4D):
 
@@ -124,71 +144,66 @@ class MyBEVStereo4DOCCNeRF(BEVStereo4D):
             # to (b, 200, 200, 16, c)
             occ_pred_ori = self.predicter(occ_pred_ori)
         
-        if self.NeRFDecoder.img_recon_head:
-            occ_pred = occ_pred_ori[..., :-3]
+        occ_pred = occ_pred_ori[..., :-3] \
+            if self.NeRFDecoder.img_recon_head else occ_pred_ori
 
         occ_score = occ_pred.softmax(-1)
         occ_res = occ_score.argmax(-1)
         occ_res = occ_res.squeeze(dim=0).cpu().numpy().astype(np.uint8)
 
         ## nerf
-        # to (b, c, 200, 200, 16)
-        # use_gt_occ = True
-        # if use_gt_occ:
-        #     occ_pred_ori = kwargs['voxel_semantics']  # (b, 200, 200, 16)
-        # density_prob = kwargs['voxel_semantics'].unsqueeze(1)
-        # # img_semantic = kwargs['img_semantic']
-        # density_prob = density_prob != 17
-        # density_prob = density_prob.float()
-        # density_prob[density_prob == 0] = -10  # scaling to avoid 0 in alphas
-        # density_prob[density_prob == 1] = 10
+        VISUALIZE = False
+        if VISUALIZE:
+            # to (b, c, 200, 200, 16)
+            use_gt_occ = False
 
-        occ_pred = occ_pred_ori.permute(0, 4, 1, 2, 3)
+            occ_pred = occ_pred_ori.permute(0, 4, 1, 2, 3)
 
-        # semantic
-        if self.NeRFDecoder.semantic_head:
-            semantic = occ_pred[:, :self.NeRFDecoder.semantic_dim, ...]
-        else:
-            semantic = torch.zeros_like(occ_pred[:, :self.NeRFDecoder.semantic_dim, ...])
-        # density
-        density_prob = -occ_pred[:, self.NeRFDecoder.semantic_dim: self.NeRFDecoder.semantic_dim+1, ...]
+            # semantic
+            if self.NeRFDecoder.semantic_head:
+                # (b, 17, 200, 200, 16)
+                semantic = occ_pred[:, :self.NeRFDecoder.semantic_dim, ...]
+            else:
+                semantic = torch.zeros_like(occ_pred[:, :self.NeRFDecoder.semantic_dim, ...])
+            # density
+            if use_gt_occ:
+                # (b, 200, 200, 16)
+                density_prob = kwargs['voxel_semantics'][0].unsqueeze(1)
+                density_prob = density_prob != 17
+                density_prob = density_prob.float()
+                density_prob[density_prob == 0] = -10  # scaling to avoid 0 in alphas
+                density_prob[density_prob == 1] = 10
+            else:
+                density_prob = -occ_pred[:, self.NeRFDecoder.semantic_dim: self.NeRFDecoder.semantic_dim+1]
 
-        intricics = kwargs['intricics']
-        pose_spatial = kwargs['pose_spatial']
-        rgb_recons = occ_pred[:, -3:]
-        render_depth, rgb_pred, semantic_pred = self.NeRFDecoder(
-            density_prob, rgb_recons, semantic, intricics[0], pose_spatial[0], 
-            is_train=False, render_mask=None)
-        
-        render_img_gt = kwargs['render_gt_img'][0]
-        current_frame_img = render_img_gt.view(6, self.num_frame, -1, render_img_gt.shape[-2], render_img_gt.shape[-1])[:, 0].cpu().numpy()
-        sem = semantic_pred[0].argmax(1)
-        NUSCENSE_LIDARSEG_PALETTE = torch.Tensor([
-            (0, 0, 0),  # noise
-            (112, 128, 144),  # barrier
-            (220, 20, 60),  # bicycle
-            (255, 127, 80),  # bus
-            (255, 158, 0),  # car
-            (233, 150, 70),  # construction_vehicle
-            (255, 61, 99),  # motorcycle
-            (0, 0, 230),  # pedestrian
-            (47, 79, 79),  # traffic_cone
-            (255, 140, 0),  # trailer
-            (255, 99, 71),  # Tomato
-            (0, 207, 191),  # nuTonomy green
-            (175, 0, 75),
-            (75, 0, 75),
-            (112, 180, 60),
-            (222, 184, 135),  # Burlywood
-            (0, 175, 0)
-        ])
-        sem_color = NUSCENSE_LIDARSEG_PALETTE[sem]
-        self.NeRFDecoder.visualize_image_semantic_depth_pair(
-            current_frame_img,
-            sem_color,
-            render_depth[0],
-            save=True
-        )
+            intricics = kwargs['intricics']
+            pose_spatial = kwargs['pose_spatial']
+            rgb_recons = occ_pred[:, -3:]
+
+            ## firstly we need to find the semantic class for each voxel
+            semantic = semantic.argmax(1)
+            # mapping the color
+            semantic = NUSCENSE_LIDARSEG_PALETTE[semantic].to(occ_pred)  # to (6, h, w, 3)
+            semantic = semantic.permute(0, 4, 1, 2, 3)
+
+            render_depth, rgb_pred, semantic_pred = self.NeRFDecoder(
+                density_prob, rgb_recons, semantic, 
+                intricics[0], pose_spatial[0], 
+                is_train=False, render_mask=None)
+            
+            render_img_gt = kwargs['render_gt_img'][0]
+            current_frame_img = render_img_gt.view(
+                6, self.num_frame, -1, 
+                render_img_gt.shape[-2], 
+                render_img_gt.shape[-1])[:, 0].cpu().numpy()
+            # sem = semantic_pred[0].argmax(1)  # to (6, H, W)
+            # sem_color = NUSCENSE_LIDARSEG_PALETTE[sem]  # to (6, h, w, 3)
+            self.NeRFDecoder.visualize_image_semantic_depth_pair(
+                current_frame_img,
+                semantic_pred[0].permute(0, 2, 3, 1),
+                render_depth[0],
+                save=True
+            )
         return [occ_res]
 
     @staticmethod
