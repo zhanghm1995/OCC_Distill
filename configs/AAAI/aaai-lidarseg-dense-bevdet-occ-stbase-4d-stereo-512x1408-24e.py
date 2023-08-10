@@ -125,17 +125,6 @@ model = dict(
         stride=[1,],
         backbone_output_ids=[0,]),
     
-    pts_middle_encoder=dict(
-        type='SparseEncoderWoDownsample',
-        in_channels=32,
-        sparse_shape=[32, 512, 512],
-        output_channels=128,
-        order=('conv', 'norm', 'act'),
-        encoder_channels=((16, 16, 32), (32, 32, 64), (64, 64, 128), (128,
-                                                                      128)),
-        encoder_paddings=((0, 0, 1), (0, 0, 1), (0, 0, [0, 1, 1]), (0, 0)),
-        block_type='basicblock'),
-    
     loss_occ=dict(
         type='CrossEntropyLoss',
         use_sigmoid=False,
@@ -178,7 +167,7 @@ train_pipeline = [
     dict(type='DefaultFormatBundle3D', class_names=class_names),
     dict(
         type='Collect3D', keys=['img_inputs', 'gt_depth', 
-                                'voxel_semantics',
+                                'voxel_semantics', 'scene_number',
                                 'flip_dx', 'flip_dy', 'points',
                                 'mask_camera', 'lidarseg_pad'])
 ]
@@ -236,7 +225,7 @@ test_data_config = dict(
     ann_file=data_root + 'bevdetv3-lidarseg-nuscenes_infos_val.pkl')
 
 data = dict(
-    samples_per_gpu=2,  # with 32 GPU
+    samples_per_gpu=4,  # with 32 GPU
     workers_per_gpu=8,
     train=dict(
         data_root=data_root,

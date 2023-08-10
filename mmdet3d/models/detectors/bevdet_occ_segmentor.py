@@ -793,17 +793,6 @@ class BEVStereo4DOCCSegmentorDense(BEVStereo4D):
         feat_flip = torch.stack(feat_flip)
         return feat_flip
 
-    @staticmethod
-    def limit_true_count(tensor, max_true_count):
-        flattened = tensor.view(-1)
-        true_indices = torch.nonzero(flattened).squeeze()
-        if true_indices.numel() <= max_true_count:
-            return tensor
-        selected_indices = true_indices[torch.randperm(true_indices.numel())[:max_true_count]]
-        flattened.zero_()
-        flattened[selected_indices] = 1
-        return tensor.view(tensor.size())
-
     def forward_train(self,
                       points=None,
                       img_metas=None,
@@ -818,8 +807,6 @@ class BEVStereo4DOCCSegmentorDense(BEVStereo4D):
             points, img=img_inputs, img_metas=img_metas, **kwargs)
         gt_depth = kwargs['gt_depth']
         semi_mask = kwargs['scene_number'] < self.scene_filter_index
-        intricics = kwargs['intricics']
-        pose_spatial = kwargs['pose_spatial']
         batch_size = len(semi_mask)
         flip_dx, flip_dy = kwargs['flip_dx'], kwargs['flip_dy']
         
@@ -885,17 +872,6 @@ class BEVStereo4DOCCSegmentorDense(BEVStereo4D):
         return losses
 
 
-# Copyright (c) Phigent Robotics. All rights reserved.
-import numpy as np
-import torch
-import torch.nn.functional as F
-
-from mmdet.models import DETECTORS
-from mmdet.models.builder import build_loss
-from mmcv.cnn.bricks.conv_module import ConvModule
-from torch import nn
-from .. import builder
-from .bevdet import BEVStereo4D
 from mmcv.ops import SparseConvTensor, SparseSequential
 from mmdet3d.ops import SparseBasicBlock, make_sparse_convmodule
 
