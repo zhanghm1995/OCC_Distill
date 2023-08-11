@@ -26,7 +26,8 @@ data_config = {
     'input_size': (512, 1408),
     # 'input_size': (224, 352), # SMALL FOR DEBUG
     'src_size': (900, 1600),
-    'render_size': (90, 160), # SMALL FOR DEBUG
+    # 'render_size': (90, 160), # SMALL FOR DEBUG
+    'render_size': (225, 400),
     # 'render_size': (384, 704),
 
     # Augmentation
@@ -142,13 +143,13 @@ model = dict(
     nerf_head=dict(
         type='NeRFDecoderHead',
         mask_render=False,
-        img_recon_head=True,
+        img_recon_head=False,
         semantic_head=True,
         semantic_dim=17,
         real_size=grid_config['x'][:2] + grid_config['y'][:2] + grid_config['z'][:2],
         stepsize=grid_config['depth'][2],
         voxels_size=voxel_resolution,
-        mode='nearest',  # ['bilinear', 'nearest']
+        mode='bilinear',  # ['bilinear', 'nearest']
         render_type='prob',  # ['prob', 'density']
         # render_size=data_config['input_size'],
         render_size=data_config['render_size'],

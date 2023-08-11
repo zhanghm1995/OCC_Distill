@@ -18,7 +18,7 @@ from mmdet3d.models.losses.lovasz_loss import Lovasz_loss
 from torch import nn
 from .. import builder
 from .bevdet import BEVStereo4D
-from .bevdet_occ_ssc import SSCNet
+from mmdet3d.models.decode_heads.nerf_head import NeRFDecoderHead
 
 
 NUSCENSE_LIDARSEG_PALETTE = torch.Tensor([
@@ -147,12 +147,25 @@ class NeRFVisualizer(object):
             save=True)
         
     def visualize_gt_occ(self,
-                         nerf_head, 
+                         nerf_head: NeRFDecoderHead, 
                          num_frame,
                          voxel_semantics,
                          render_img_gt,
                          flip_dx, flip_dy,
-                         intricics, pose_spatial):
+                         intricics, pose_spatial,
+                         save_dir="./"):
+        """Visualize the occupancy semantic voxels
+
+        Args:
+            nerf_head (_type_): _description_
+            num_frame (int): _description_
+            voxel_semantics (Tensor): (b, 200, 200, 16)
+            render_img_gt (_type_): _description_
+            flip_dx (_type_): _description_
+            flip_dy (_type_): _description_
+            intricics (_type_): _description_
+            pose_spatial (_type_): _description_
+        """
         # to (b, 1, 200, 200, 16)
         voxel_semantics = voxel_semantics.unsqueeze(1)
 
@@ -171,12 +184,12 @@ class NeRFVisualizer(object):
         print(sem_color.shape, sem_color_flip.shape)
 
         # nerf decoder
+        # NOTE: Here we use the RGB rendering to render the semantic map
         render_depth, render_color, _ = nerf_head(
             density_prob_flip,
             sem_color_flip,
             density_prob_flip.tile(1, nerf_head.semantic_dim, 1, 1, 1),
-            intricics, pose_spatial, True
-        )
+            intricics, pose_spatial, True, force_render_rgb=True)
         
         print('density_prob', density_prob.shape)  # [1, 1, 200, 200, 16]
         print('render_depth', render_depth.shape, render_depth.max(), render_depth.min())  # [1, 6, 224, 352]
@@ -190,7 +203,8 @@ class NeRFVisualizer(object):
             current_frame_img, 
             render_color.permute(0, 1, 3, 4, 2)[0], 
             render_depth[0],
-            save=True)
+            save=True,
+            save_dir=save_dir)
 
 
 @DETECTORS.register_module()

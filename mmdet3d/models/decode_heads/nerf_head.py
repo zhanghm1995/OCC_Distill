@@ -12,6 +12,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 import cv2
+import os
+import os.path as osp
 import time
 from mmdet3d.models.builder import HEADS
 from mmdet3d.models.losses.lovasz_loss import lovasz_softmax
@@ -215,7 +217,30 @@ class NeRFDecoderHead(nn.Module):
 
     def get_density(self, rays_o, rays_d, voxel, rgb_recon, semantic_recon, 
                     is_train, mode, nonlinear_sample=False, render_mask=None,
-                    return_weights=False):
+                    return_weights=False,
+                    force_render_rgb=False):
+        """_summary_
+
+        Args:
+            rays_o (_type_): _description_
+            rays_d (_type_): _description_
+            voxel (_type_): _description_
+            rgb_recon (_type_): _description_
+            semantic_recon (_type_): _description_
+            is_train (bool): _description_
+            mode (_type_): _description_
+            nonlinear_sample (bool, optional): _description_. Defaults to False.
+            render_mask (_type_, optional): _description_. Defaults to None.
+            return_weights (bool, optional): _description_. Defaults to False.
+            force_render_rgb (bool, optional): Whether force enabling the rgb rendering,
+                it's useful when rendering some RGB image for visualization. Defaults to False.
+
+        Raises:
+            NotImplementedError: _description_
+
+        Returns:
+            _type_: _description_
+        """
         with torch.no_grad():
             if render_mask is None:
                 rays_o_i = rays_o.flatten(0, 2)  # H,W,3
@@ -237,7 +262,7 @@ class NeRFDecoderHead(nn.Module):
             probs = probs.diff(dim=1, prepend=torch.zeros((rays_pts.shape[:1])).unsqueeze(1).to('cuda'))
             depth = (probs * interval).sum(-1)
 
-            if self.img_recon_head:
+            if force_render_rgb or self.img_recon_head:
                 rgb = self.grid_sampler(mask_rays_pts, rgb_recon)
                 rgb_cache = torch.zeros_like(rays_pts)
                 rgb_cache[~mask_outbbox] = rgb  # 473088, 287, 3
@@ -262,7 +287,7 @@ class NeRFDecoderHead(nn.Module):
             weights = alpha * alphainv_cum[..., :-1]  # alpha * accumulated transmittance = weights
             depth = (weights * interval).sum(-1)
 
-            if self.img_recon_head:
+            if force_render_rgb or self.img_recon_head:
                 rgb = self.grid_sampler(mask_rays_pts, rgb_recon)
                 rgb_cache = torch.zeros_like(rays_pts)
                 rgb_cache[~mask_outbbox] = rgb  # 473088, 287, 3
@@ -347,7 +372,8 @@ class NeRFDecoderHead(nn.Module):
                 pose_spatial, 
                 is_train=True, 
                 render_mask=None, 
-                return_weights=False):
+                return_weights=False,
+                force_render_rgb=False):
         '''
         B: batchsize, N: num_view, H, W: img_size
         Args:
@@ -388,7 +414,8 @@ class NeRFDecoderHead(nn.Module):
             rendering_results = self.get_density(
                 rays_o[b], rays_d[b], density_prob[b], rgb_recon[b], semantic_pred[b], is_train,
                 mode=self.mode, nonlinear_sample=self.nonlinear_sample, render_mask=rmask,
-                return_weights=return_weights
+                return_weights=return_weights,
+                force_render_rgb=force_render_rgb
             )
             depth, rgb_marched, semantic = rendering_results[:3]
             if not self.mask_render:
@@ -520,7 +547,8 @@ class NeRFDecoderHead(nn.Module):
                                             images, 
                                             semantic, 
                                             render, 
-                                            save=False):
+                                            save=False,
+                                            save_dir=None):
         '''
         This is a debug function!!
         Args:
@@ -543,7 +571,9 @@ class NeRFDecoderHead(nn.Module):
             concated_image_list.append(visual_img)
             pred_depth_color = visualize_depth(render[b])
             pred_depth_color = pred_depth_color[..., [2, 1, 0]]
-            concated_render_list.append(cv2.resize(pred_depth_color.copy(), (semantic.shape[-2], semantic.shape[-3])))
+            concated_render_list.append(
+                cv2.resize(pred_depth_color.copy(), 
+                           (semantic.shape[-2], semantic.shape[-3])))
 
         fig, ax = plt.subplots(nrows=6, ncols=3, figsize=(6, 6))
         ij = [[i, j] for i in range(2) for j in range(3)]
@@ -556,10 +586,34 @@ class NeRFDecoderHead(nn.Module):
                 ax[i, j].axis('off')
 
         plt.subplots_adjust(wspace=0.01, hspace=0.01)
-        if not save:
-            plt.show()
+
+        ## save the seperate images
+        if save_dir is not None:
+            from PIL import Image
+            os.makedirs(save_dir, exist_ok=True)
+
+            full_img_path = osp.join(save_dir, '%f.png' % time.time())
+            plt.savefig(full_img_path)
+
+            for i in range(len(concated_render_list)):
+                depth_map = concated_render_list[i].astype(np.uint8)
+                semantic_map = semantic[i].astype(np.uint8)
+                camera_img = (concated_image_list[i][..., ::-1] * 255.0).astype(np.uint8)
+
+                save_depth_map_path = osp.join(save_dir, f"{i:02}_rendered_depth.png")
+                save_semantic_map_path = osp.join(save_dir, f"{i:02}_rendered_semantic.png")
+                save_camera_img_path = osp.join(save_dir, f"{i:02}_camera_img.png")
+
+                depth_map = Image.fromarray(depth_map)
+                depth_map.save(save_depth_map_path)
+
+                semantic_map = Image.fromarray(semantic_map)
+                semantic_map.save(save_semantic_map_path)
+
+                camera_img = Image.fromarray(camera_img)
+                camera_img.save(save_camera_img_path)
         else:
-            plt.savefig('%f.png' % time.time())
+            plt.show()
 
 if __name__ == '__main__':
     import time

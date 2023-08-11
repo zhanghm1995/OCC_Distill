@@ -19,6 +19,7 @@ from torch import nn
 from .. import builder
 from .bevdet import BEVStereo4D
 from .bevdet_occ_ssc import SSCNet
+from .bevdet_occ_nerf_S_visualizer import NeRFVisualizer
 
 
 NUSCENSE_LIDARSEG_PALETTE = torch.Tensor([
@@ -634,6 +635,7 @@ class BEVStereo4DSSCOCCNeRF(BEVStereo4D):
                  refine_conv=False,
                  return_weights=False,
                  use_lovasz=True,
+                 use_nerf_loss=True,
                  **kwargs):
         
         super(BEVStereo4DSSCOCCNeRF, self).__init__(**kwargs)
@@ -682,6 +684,7 @@ class BEVStereo4DSSCOCCNeRF(BEVStereo4D):
         self.class_wise = class_wise
         self.align_after_view_transfromation = False
         self.loss_lovasz = Lovasz_loss(255)
+        self.use_nerf_loss = use_nerf_loss
 
     def loss_single(self, voxel_semantics, mask_camera, preds, semi_mask=None):
         loss_ = dict()
@@ -727,6 +730,26 @@ class BEVStereo4DSSCOCCNeRF(BEVStereo4D):
 
         occ_score = occ_pred.softmax(-1)
         occ_res = occ_score.argmax(-1)
+        
+        ## nerf visualization
+        VISUALIZE = True
+        if VISUALIZE:
+            intricics = kwargs['intricics'][0]
+            pose_spatial = kwargs['pose_spatial'][0]
+            render_img_gt = kwargs['render_gt_img'][0]
+            flip_dx = [False]
+            flip_dy = [False]
+
+            visualizer = NeRFVisualizer()
+            visualizer.visualize_gt_occ(self.NeRFDecoder, 
+                                        self.num_frame,
+                                        occ_res,
+                                        render_img_gt,
+                                        flip_dx, flip_dy,
+                                        intricics, pose_spatial,
+                                        save_dir="./AAAI_visualization/student-5e")
+            exit()
+            
         occ_res = occ_res.squeeze(dim=0).cpu().numpy().astype(np.uint8)
         return [occ_res]
 
@@ -967,10 +990,10 @@ class BEVStereo4DSSCOCCNeRF(BEVStereo4D):
         intricics = kwargs['intricics']
         pose_spatial = kwargs['pose_spatial']
         flip_dx, flip_dy = kwargs['flip_dx'], kwargs['flip_dy']
+        
         losses = dict()
         loss_depth = self.img_view_transformer.get_depth_loss(gt_depth, depth)
         losses['loss_depth'] = loss_depth
-        render_img_gt = kwargs['render_gt_img']
         render_gt_depth = kwargs['render_gt_depth']
         
         internal_feats_dict = dict()
@@ -1015,17 +1038,12 @@ class BEVStereo4DSSCOCCNeRF(BEVStereo4D):
         density_prob_flip = self.inverse_flip_aug(density_prob, flip_dx, flip_dy)
 
         # random view selection
+        rand_ind = None
         if self.num_random_view != -1:
             rand_ind = torch.multinomial(torch.tensor([1/self.num_random_view]*self.num_random_view), self.num_random_view, replacement=False)
             intricics = intricics[:, rand_ind]
             pose_spatial = pose_spatial[:, rand_ind]
             render_gt_depth = render_gt_depth[:, rand_ind]
-            render_img_gt = render_img_gt[:, rand_ind]
-
-        # rendering
-        # import time
-        # torch.cuda.synchronize()
-        # start = time.time()
 
         if self.NeRFDecoder.mask_render:
             render_mask = render_gt_depth > 0.0
@@ -1046,25 +1064,32 @@ class BEVStereo4DSSCOCCNeRF(BEVStereo4D):
             # print("inference time:", end - start)
 
             render_gt_depth = render_gt_depth[render_mask]
-            loss_nerf = self.NeRFDecoder.compute_depth_loss(render_depth, render_gt_depth, render_gt_depth > 0.0)
-            if torch.isnan(loss_nerf):
-                print('NaN in DepthNeRF loss!')
-                loss_nerf = loss_depth
-            losses['loss_nerf'] = loss_nerf
+
+            if self.use_nerf_loss:
+                loss_nerf = self.NeRFDecoder.compute_depth_loss(
+                    render_depth, render_gt_depth, render_gt_depth > 0.0)
+                if torch.isnan(loss_nerf):
+                    print('NaN in DepthNeRF loss!')
+                    loss_nerf = loss_depth
+                losses['loss_nerf'] = loss_nerf
 
             internal_feats_dict['render_mask'] = render_mask
             internal_feats_dict['depth_mask'] = render_gt_depth > 0.0
 
-            if self.NeRFDecoder.semantic_head:
+            if self.use_nerf_loss and self.NeRFDecoder.semantic_head:
                 img_semantic = kwargs['img_semantic']
                 img_semantic = img_semantic[render_mask]
-                loss_nerf_sem = self.NeRFDecoder.compute_semantic_loss_flatten(semantic_pred, img_semantic, lovasz=self.lovasz)
+                loss_nerf_sem = self.NeRFDecoder.compute_semantic_loss_flatten(
+                    semantic_pred, img_semantic, lovasz=self.lovasz)
                 if torch.isnan(loss_nerf):
                     print('NaN in SemNeRF loss!')
                     loss_nerf_sem = loss_depth
                 losses['loss_nerf_sem'] = loss_nerf_sem
 
-            if self.NeRFDecoder.img_recon_head:
+            if self.use_nerf_loss and self.NeRFDecoder.img_recon_head:
+                render_img_gt = kwargs['render_gt_img'] \
+                    if rand_ind is None else kwargs['render_gt_img'][:, rand_ind]
+
                 batch_size, num_camera = intricics.shape[:2]
                 img_gts = render_img_gt.view(batch_size, num_camera, self.num_frame, -1, render_img_gt.shape[-2], render_img_gt.shape[-1])[:, :, 0]
                 img_gts = img_gts.permute(0, 1, 3, 4, 2)[render_mask]

@@ -43,9 +43,11 @@ def load_pickle(pickle_file_path):
 
 
 def sample_camera_images(anno_file, 
-                         sample_idx=None, 
-                         save_root=None):
-    """Sample the camera images from the dataset and save them to the directory.
+                         sample_idx=None,
+                         save_root=None,
+                         need_sort_data=True):
+    """Sample the camera images according to the sample_idx
+    from the dataset and save them to the directory.
 
     Args:
         anno_file (_type_): The .pkl file path.
@@ -55,6 +57,9 @@ def sample_camera_images(anno_file,
         dataset = pickle.load(fp)
     
     data_infos = dataset['infos']
+
+    if need_sort_data:
+        data_infos = list(sorted(data_infos, key=lambda e: e['timestamp']))
     
     if sample_idx is None:
         sample_idx = np.random.randint(6019)
@@ -148,12 +153,14 @@ def save_point_cloud(anno_file, sample_idx: int = None):
 if __name__ == "__main__":
     # pickle_path = "data/nuscenes/bevdetv3-lidarseg-nuscenes_infos_train.pkl"
     pickle_path = "data/nuscenes/bevdetv3-lidarseg-nuscenes_infos_val.pkl"
-    save_all_cam_images(pickle_path, save_root="./aaai_all_validation_sorted")
+    sample_camera_images(pickle_path, sample_idx=4637, save_root="./AAAI_visualization")
+    exit()
+
+    save_all_cam_images(pickle_path, save_root="./aaai_all_validation")
     exit(0)
     save_point_cloud(pickle_path, sample_idx=3827)
     exit()
-    sample_camera_images(pickle_path, sample_idx=3827, save_root="./aaai_figure")
-    exit()
+    
     
     
     

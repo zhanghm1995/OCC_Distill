@@ -25,7 +25,7 @@ data_config = {
     # 'input_size': (224, 352), # SMALL FOR DEBUG
     'src_size': (900, 1600),
     # 'render_size': (90, 160), # SMALL FOR DEBUG
-    'render_size': (384, 704),
+    'render_size': (225, 400),
 
     # Augmentation
     'resize': (-0.06, 0.11),
@@ -173,6 +173,8 @@ student_model = dict(
     num_adj=len(range(*multi_adj_frame_id_cfg)),
     scene_filter_index=10086, # all scenes
     return_weights=True,
+
+    use_nerf_loss=False,
     
     img_backbone=dict(
         type='SwinTransformer',
@@ -276,13 +278,13 @@ model = dict(
         use_depth_align=True,
         depth_align_loss=dict(
             type='KnowledgeDistillationKLDivLoss', 
-            loss_weight=1.0),
+            loss_weight=100.0),
         use_occ_logits_align=True,
         occ_logits_align_loss=dict(
             type='KnowledgeDistillationKLDivLoss', 
-            loss_weight=0.1),
+            loss_weight=10.0),
         use_semantic_align=True,
-        loss_semantic_align_weight=1.0)
+        loss_semantic_align_weight=10.0)
 )
 
 # Data
@@ -326,10 +328,10 @@ train_pipeline = [
     dict(
         type='Collect3D', keys=['img_inputs', 'points', 
                                 'gt_depth', 'voxel_semantics',
-                                'img_semantic', 'scene_number',
+                                'scene_number',
                                 'intricics', 'pose_spatial', 
                                 'flip_dx', 'flip_dy', 
-                                'render_gt_img', 'render_gt_depth',
+                                'render_gt_depth',
                                 'mask_camera'])
 ]
 
