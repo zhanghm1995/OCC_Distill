@@ -2,12 +2,14 @@
 Copyright (c) 2023 by Haiming Zhang. All Rights Reserved.
 
 Author: Haiming Zhang
-Date: 2023-08-02 21:51:17
+Date: 2023-08-10 14:47:47
 Email: haimingzhang@link.cuhk.edu.cn
-Description: The student baseline model.
+Description: The BEVDet fusion with nerf head.
 '''
 
+
 _base_ = ['../_base_/datasets/nus-3d.py', '../_base_/default_runtime.py']
+# Global
 # For nuScenes we usually do 10-class detection
 class_names = [
     'car', 'truck', 'construction_vehicle', 'bus', 'trailer', 'barrier',
@@ -22,7 +24,11 @@ data_config = {
     'Ncams':
     6,
     'input_size': (512, 1408),
+    # 'input_size': (224, 352), # SMALL FOR DEBUG
     'src_size': (900, 1600),
+    # 'render_size': (90, 160), # SMALL FOR DEBUG
+    'render_size': (225, 400),
+    # 'render_size': (384, 704),
 
     # Augmentation
     'resize': (-0.06, 0.11),
@@ -33,6 +39,9 @@ data_config = {
 }
 
 # Model
+point_cloud_range = [-40.0, -40.0, -1.0, 40.0, 40.0, 5.4]
+voxel_size = [0.2, 0.2, 6.4]
+voxel_resolution = [16, 200, 200]
 grid_config = {
     'x': [-40, 40, 0.4],
     'y': [-40, 40, 0.4],
@@ -40,52 +49,36 @@ grid_config = {
     'depth': [1.0, 45.0, 0.5],
 }
 
-voxel_size = [0.1, 0.1, 0.2]
-
 numC_Trans = 32
 
 multi_adj_frame_id_cfg = (1, 1+1, 1)
 
 model = dict(
-    type='BEVStereo4DSSCOCC',
+    type='BEVFusionStereo4DOCCNeRF',
     align_after_view_transfromation=False,
     num_adj=len(range(*multi_adj_frame_id_cfg)),
     img_backbone=dict(
-        type='SwinTransformer',
-        pretrain_img_size=224,
-        patch_size=4,
-        window_size=12,
-        mlp_ratio=4,
-        embed_dims=128,
-        depths=[2, 2, 18, 2],
-        num_heads=[4, 8, 16, 32],
-        strides=(4, 2, 2, 2),
-        out_indices=(2, 3),
-        qkv_bias=True,
-        qk_scale=None,
-        patch_norm=True,
-        drop_rate=0.,
-        attn_drop_rate=0.,
-        drop_path_rate=0.1,
-        use_abs_pos_embed=False,
-        return_stereo_feat=True,
-        act_cfg=dict(type='GELU'),
-        norm_cfg=dict(type='LN', requires_grad=True),
-        pretrain_style='official',
-        output_missing_index_as_none=False),
+        type='ResNet',
+        depth=50,
+        num_stages=4,
+        out_indices=(0, 2, 3),
+        frozen_stages=-1,
+        norm_cfg=dict(type='BN', requires_grad=True),
+        norm_eval=False,
+        with_cp=True,
+        style='pytorch'),
     img_neck=dict(
-        type='FPN_LSS',
-        in_channels=512 + 1024,
-        out_channels=512,
-        # with_cp=False,
-        extra_upsample=None,
-        input_feature_index=(0, 1),
-        scale_factor=2),
+        type='CustomFPN',
+        in_channels=[1024, 2048],
+        out_channels=256,
+        num_outs=1,
+        start_level=0,
+        out_ids=[0]),
     img_view_transformer=dict(
         type='LSSViewTransformerBEVStereo',
         grid_config=grid_config,
         input_size=data_config['input_size'],
-        in_channels=512,
+        in_channels=256,
         out_channels=numC_Trans,
         sid=False,
         collapse_z=False,
@@ -114,6 +107,57 @@ model = dict(
         num_channels=[numC_Trans,],
         stride=[1,],
         backbone_output_ids=[0,]),
+    
+    ### The lidar branch, adopted from BEVFusion
+    pts_voxel_layer=dict(
+        max_num_points=64,
+        point_cloud_range=point_cloud_range,
+        voxel_size=voxel_size,
+        max_voxels=(30000, 40000)),
+    pts_voxel_encoder=dict(
+        type='HardVFE',
+        in_channels=4,
+        feat_channels=[64, 64],
+        with_distance=False,
+        voxel_size=voxel_size,
+        with_cluster_center=True,
+        with_voxel_center=True,
+        point_cloud_range=point_cloud_range,
+        norm_cfg=dict(type='naiveSyncBN1d', eps=1e-3, momentum=0.01)),
+    pts_middle_encoder=dict(
+        type='PointPillarsScatter', in_channels=64, output_shape=[400, 400]),
+    pts_backbone=dict(
+        type='SECOND',
+        in_channels=64,
+        norm_cfg=dict(type='naiveSyncBN2d', eps=1e-3, momentum=0.01),
+        layer_nums=[3, 5, 5],
+        layer_strides=[2, 2, 2],
+        out_channels=[64, 128, 256]),
+    pts_neck=dict(
+        type='SECONDFPN',
+        norm_cfg=dict(type='naiveSyncBN2d', eps=1e-3, momentum=0.01),
+        in_channels=[64, 128, 256],
+        upsample_strides=[1, 2, 4],
+        out_channels=[128, 128, 128]),
+    
+    nerf_head=dict(
+        type='NeRFDecoderHead',
+        mask_render=False,
+        img_recon_head=False,
+        semantic_head=True,
+        semantic_dim=17,
+        real_size=grid_config['x'][:2] + grid_config['y'][:2] + grid_config['z'][:2],
+        stepsize=grid_config['depth'][2],
+        voxels_size=voxel_resolution,
+        mode='bilinear',  # ['bilinear', 'nearest']
+        render_type='prob',  # ['prob', 'density']
+        # render_size=data_config['input_size'],
+        render_size=data_config['render_size'],
+        depth_range=grid_config['depth'][:2],
+        loss_nerf_weight=0.5,
+        depth_loss_type='silog',  # ['silog', 'l1', 'rl1', 'sml1']
+        variance_focus=0.85,  # only for silog loss
+    ),
     loss_occ=dict(
         type='CrossEntropyLoss',
         use_sigmoid=False,
@@ -134,11 +178,12 @@ bda_aug_conf = dict(
 
 train_pipeline = [
     dict(
-        type='PrepareImageInputs',
+        type='PrepareImageInputsForNeRF',
         is_train=True,
         data_config=data_config,
         sequential=True),
     dict(type='LoadOccGTFromFile'),
+    dict(type='LoadLiDARSegGTFromFile'),
     dict(
         type='LoadAnnotationsBEVDepth',
         bda_aug_conf=bda_aug_conf,
@@ -148,17 +193,32 @@ train_pipeline = [
         type='LoadPointsFromFile',
         coord_type='LIDAR',
         load_dim=5,
-        use_dim=5,
+        use_dim=[0,1,2,4],
         file_client_args=file_client_args),
-    dict(type='PointToMultiViewDepth', downsample=1, grid_config=grid_config),
+    dict(type='PointToMultiViewDepthForNeRF', downsample=1, grid_config=grid_config, 
+         render_size=data_config['render_size'],
+         render_scale=[data_config['render_size'][0]/data_config['src_size'][0], 
+                       data_config['render_size'][1]/data_config['src_size'][1]]),
+    dict(type='PointToEgo'),
+    dict(type='PointsRangeFilter', point_cloud_range=point_cloud_range),
+    dict(type='PointsConditionalFlip'),
     dict(type='DefaultFormatBundle3D', class_names=class_names),
     dict(
-        type='Collect3D', keys=['img_inputs', 'gt_depth', 'voxel_semantics',
-                                'mask_lidar','mask_camera'])
+        type='Collect3D', keys=['img_inputs', 'points', 
+                                'gt_depth', 'voxel_semantics',
+                                'img_semantic', 'scene_number',
+                                'intricics', 'pose_spatial', 
+                                'flip_dx', 'flip_dy', 
+                                'render_gt_img', 'render_gt_depth',
+                                'mask_camera'])
 ]
 
 test_pipeline = [
-    dict(type='PrepareImageInputs', data_config=data_config, sequential=True),
+    dict(
+        type='PrepareImageInputsForNeRF',
+        data_config=data_config,
+        sequential=True),
+    dict(type='LoadOccGTFromFile'),
     dict(
         type='LoadAnnotationsBEVDepth',
         bda_aug_conf=bda_aug_conf,
@@ -168,24 +228,34 @@ test_pipeline = [
         type='LoadPointsFromFile',
         coord_type='LIDAR',
         load_dim=5,
-        use_dim=5,
+        use_dim=[0,1,2,4],
         file_client_args=file_client_args),
+    dict(type='PointToMultiViewDepthForNeRF', downsample=1, grid_config=grid_config, 
+         render_size=data_config['render_size'],
+         render_scale=[data_config['render_size'][0]/data_config['src_size'][0], 
+                       data_config['render_size'][1]/data_config['src_size'][1]]),
+    dict(type='PointToEgo'),
+    dict(type='PointsConditionalFlip'),
     dict(
         type='MultiScaleFlipAug3D',
         img_scale=(1333, 800),
         pts_scale_ratio=1,
         flip=False,
         transforms=[
+            dict(type='PointsRangeFilter', point_cloud_range=point_cloud_range),
             dict(
                 type='DefaultFormatBundle3D',
                 class_names=class_names,
                 with_label=False),
-            dict(type='Collect3D', keys=['points', 'img_inputs'])
+            dict(type='Collect3D', keys=['points', 'img_inputs',
+                                         'voxel_semantics',
+                                         'intricics', 'pose_spatial',
+                                         'render_gt_img',])
         ])
 ]
 
 input_modality = dict(
-    use_lidar=False,
+    use_lidar=True,
     use_camera=True,
     use_radar=False,
     use_map=False,
@@ -206,7 +276,7 @@ test_data_config = dict(
     ann_file=data_root + 'bevdetv3-lidarseg-nuscenes_infos_val.pkl')
 
 data = dict(
-    samples_per_gpu=2,  # with 32 GPU
+    samples_per_gpu=2,
     workers_per_gpu=8,
     train=dict(
         data_root=data_root,
@@ -225,24 +295,16 @@ for key in ['val', 'train', 'test']:
     data[key].update(share_data_config)
 
 # Optimizer
-optimizer = dict(
-    type='AdamW',
-    lr=2e-4,
-    # paramwise_cfg=dict(
-    #     custom_keys={
-    #         'img_backbone': dict(lr_mult=0.1),
-    #     }),
-    weight_decay=0.01)
-optimizer_config = dict(grad_clip=dict(max_norm=35, norm_type=2))
-# learning policy
+optimizer = dict(type='AdamW', lr=1e-4, weight_decay=1e-2)
+optimizer_config = dict(grad_clip=dict(max_norm=5, norm_type=2))
+
 lr_config = dict(
-    policy='CosineAnnealing',
+    policy='step',
     warmup='linear',
-    warmup_iters=500,
-    warmup_ratio=1.0 / 3,
-    min_lr_ratio=1e-3)
-total_epochs = 24
-runner = dict(type='EpochBasedRunner', max_epochs=total_epochs)
+    warmup_iters=200,
+    warmup_ratio=0.001,
+    step=[100,])
+runner = dict(type='EpochBasedRunner', max_epochs=24)
 
 custom_hooks = [
     dict(
@@ -250,18 +312,6 @@ custom_hooks = [
         init_updates=10560,
         priority='NORMAL',
     ),
-    dict(
-        type='SyncbnControlHook',
-        syncbn_start_epoch=0,
-    ),
 ]
 
-log_config = dict(
-    interval=50,
-    hooks=[
-        dict(type='TextLoggerHook'),
-        dict(type='TensorboardLoggerHook')
-    ])
-checkpoint_config = dict(interval=2, max_keep_ckpts=10)
-
-load_from = "exps/bevdet-dev2.1/bevdet-stbase-4d-stereo-512x1408-cbgs.pth"
+load_from="bevdet-r50-4d-stereo-cbgs.pth"

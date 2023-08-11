@@ -4,6 +4,7 @@ from .bevdet import BEVDepth4D, BEVDet, BEVDet4D, BEVDetTRT, BEVStereo4D
 from .bevdet_occ import BEVStereo4DOCC, BEVFusionStereo4DOCC
 from .bevdet_occ_nerf_S import MyBEVStereo4DOCCNeRF, BEVStereo4DSSCOCCNeRF
 from .bevdet_occ_nerf_S_v1 import MyBEVStereo4DOCCNeRFV1
+from .bevdet_occ_nerf_S_visualizer import MyBEVStereo4DOCCNeRFVisualizer
 from .bevdet_occ_pretrain import BEVStereo4DOCCPretrain
 from .bevdet_occ_ssc import BEVFusionStereo4DSSCOCC
 from .bevdet_fusion_occ import BEVFusionStereo4DOCCNeRF
@@ -43,5 +44,5 @@ __all__ = [
     'MyBEVStereo4DOCCNeRFV1', 'MyBEVLidarOCCNeRF',
     'MyBEVLidarDistillCameraOCCNeRF', 'BEVStereo4DOCCSegmentor',
     'BEVStereo4DSSCOCCNeRF', 'BEVFusionStereo4DOCCNeRF',
-    'BEVStereo4DOCCSegmentorDense'
+    'BEVStereo4DOCCSegmentorDense', 'MyBEVStereo4DOCCNeRFVisualizer'
 ]

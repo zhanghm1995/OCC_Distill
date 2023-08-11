@@ -2,9 +2,9 @@
 Copyright (c) 2023 by Haiming Zhang. All Rights Reserved.
 
 Author: Haiming Zhang
-Date: 2023-08-02 21:51:17
+Date: 2023-08-10 17:35:43
 Email: haimingzhang@link.cuhk.edu.cn
-Description: The student baseline model.
+Description: The student baseline model with nerf head.
 '''
 
 _base_ = ['../_base_/datasets/nus-3d.py', '../_base_/default_runtime.py']
@@ -23,6 +23,8 @@ data_config = {
     6,
     'input_size': (512, 1408),
     'src_size': (900, 1600),
+    # 'render_size': (90, 160), # SMALL FOR DEBUG
+    'render_size': (225, 400),
 
     # Augmentation
     'resize': (-0.06, 0.11),
@@ -40,16 +42,17 @@ grid_config = {
     'depth': [1.0, 45.0, 0.5],
 }
 
-voxel_size = [0.1, 0.1, 0.2]
+voxel_size = [16, 200, 200]
 
 numC_Trans = 32
 
-multi_adj_frame_id_cfg = (1, 1+1, 1)
+multi_adj_frame_id_cfg = (1, 1 + 1, 1)
 
 model = dict(
-    type='BEVStereo4DSSCOCC',
+    type='BEVStereo4DSSCOCCNeRF',
     align_after_view_transfromation=False,
     num_adj=len(range(*multi_adj_frame_id_cfg)),
+    scene_filter_index=10086, # all scenes
     img_backbone=dict(
         type='SwinTransformer',
         pretrain_img_size=224,
@@ -81,6 +84,25 @@ model = dict(
         extra_upsample=None,
         input_feature_index=(0, 1),
         scale_factor=2),
+    ## the nerf decoder head
+    nerf_head=dict(
+        type='NeRFDecoderHead',
+        mask_render=False,
+        img_recon_head=False,
+        semantic_head=True,
+        semantic_dim=17,
+        real_size=grid_config['x'][:2] + grid_config['y'][:2] + grid_config['z'][:2],
+        stepsize=grid_config['depth'][2],
+        voxels_size=voxel_size,
+        mode='bilinear',  # ['bilinear', 'nearest']
+        render_type='prob',  # ['prob', 'density']
+        # render_size=data_config['input_size'],
+        render_size=data_config['render_size'],
+        depth_range=grid_config['depth'][:2],
+        loss_nerf_weight=0.5,
+        depth_loss_type='silog',  # ['silog', 'l1', 'rl1', 'sml1']
+        variance_focus=0.85,  # only for silog loss
+    ),
     img_view_transformer=dict(
         type='LSSViewTransformerBEVStereo',
         grid_config=grid_config,
@@ -134,11 +156,12 @@ bda_aug_conf = dict(
 
 train_pipeline = [
     dict(
-        type='PrepareImageInputs',
+        type='PrepareImageInputsForNeRF',
         is_train=True,
         data_config=data_config,
         sequential=True),
     dict(type='LoadOccGTFromFile'),
+    dict(type='LoadLiDARSegGTFromFile'),
     dict(
         type='LoadAnnotationsBEVDepth',
         bda_aug_conf=bda_aug_conf,
@@ -150,15 +173,22 @@ train_pipeline = [
         load_dim=5,
         use_dim=5,
         file_client_args=file_client_args),
-    dict(type='PointToMultiViewDepth', downsample=1, grid_config=grid_config),
+    dict(type='PointToMultiViewDepthForNeRF', downsample=1, grid_config=grid_config, 
+         render_size=data_config['render_size'],
+         render_scale=[data_config['render_size'][0]/data_config['src_size'][0], 
+                       data_config['render_size'][1]/data_config['src_size'][1]]),
     dict(type='DefaultFormatBundle3D', class_names=class_names),
     dict(
-        type='Collect3D', keys=['img_inputs', 'gt_depth', 'voxel_semantics',
-                                'mask_lidar','mask_camera'])
+        type='Collect3D', keys=['img_inputs', 'gt_depth', 
+                                'voxel_semantics', 'mask_lidar', 
+                                'mask_camera', 'img_semantic',
+                                'intricics', 'pose_spatial', 
+                                'flip_dx', 'flip_dy', 
+                                'render_gt_img', 'render_gt_depth'])
 ]
 
 test_pipeline = [
-    dict(type='PrepareImageInputs', data_config=data_config, sequential=True),
+    dict(type='PrepareImageInputsForNeRF', data_config=data_config, sequential=True),
     dict(
         type='LoadAnnotationsBEVDepth',
         bda_aug_conf=bda_aug_conf,
@@ -170,6 +200,10 @@ test_pipeline = [
         load_dim=5,
         use_dim=5,
         file_client_args=file_client_args),
+    dict(type='PointToMultiViewDepthForNeRF', downsample=1, grid_config=grid_config, 
+         render_size=data_config['render_size'],
+         render_scale=[data_config['render_size'][0]/data_config['src_size'][0], 
+                       data_config['render_size'][1]/data_config['src_size'][1]]),
     dict(
         type='MultiScaleFlipAug3D',
         img_scale=(1333, 800),
@@ -180,7 +214,9 @@ test_pipeline = [
                 type='DefaultFormatBundle3D',
                 class_names=class_names,
                 with_label=False),
-            dict(type='Collect3D', keys=['points', 'img_inputs'])
+            dict(type='Collect3D', keys=['points', 'img_inputs',
+                                         'intricics', 'pose_spatial',
+                                         'render_gt_img'])
         ])
 ]
 
@@ -203,10 +239,10 @@ share_data_config = dict(
 
 test_data_config = dict(
     pipeline=test_pipeline,
-    ann_file=data_root + 'bevdetv3-lidarseg-nuscenes_infos_val.pkl')
+    ann_file=data_root + 'bevdetv3-lidarseg-nuscenes_infos_val.pkl',)
 
 data = dict(
-    samples_per_gpu=2,  # with 32 GPU
+    samples_per_gpu=4,
     workers_per_gpu=8,
     train=dict(
         data_root=data_root,

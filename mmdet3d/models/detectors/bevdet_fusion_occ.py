@@ -15,6 +15,7 @@ from mmdet.core import multi_apply
 
 from .. import builder
 from .bevdet_occ import BEVFusionStereo4DOCC
+from .bevdet_occ_nerf_S_visualizer import NeRFVisualizer
 
 
 def merge_aug_occs(aug_occ_list):
@@ -64,11 +65,32 @@ class BEVFusionStereo4DOCCNeRF(BEVFusionStereo4DOCC):
         img_feats, _, _ = self.extract_feat(
             points, img=img, img_metas=img_metas, **kwargs)
         occ_pred = self.final_conv(img_feats[0]).permute(0, 4, 3, 2, 1)
-        # bncdhw->bnwhdc
         if self.use_predicter:
-            occ_pred = self.predicter(occ_pred)
-        occ_score=occ_pred.softmax(-1)
-        occ_res=occ_score.argmax(-1)
+            occ_pred = self.predicter(occ_pred)  # to (b, 200, 200, 16, 18)
+        
+        occ_score = occ_pred.softmax(-1)
+        occ_res = occ_score.argmax(-1)
+
+        VISUALIZE = False
+        if VISUALIZE:
+            intricics = kwargs['intricics'][0]
+            pose_spatial = kwargs['pose_spatial'][0]
+            render_img_gt = kwargs['render_gt_img'][0]
+            flip_dx = [False]
+            flip_dy = [False]
+            # the gt for debug
+            voxel_semantics = kwargs['voxel_semantics'][0]
+
+            visualizer = NeRFVisualizer()
+            visualizer.visualize_gt_occ(self.NeRFDecoder, 
+                                        self.num_frame,
+                                        occ_res,
+                                        render_img_gt, 
+                                        flip_dx, flip_dy,
+                                        intricics, pose_spatial,
+                                        save_dir="./AAAI_visualization/debug")
+            exit()
+        
         occ_res = occ_res.squeeze(dim=0).cpu().numpy().astype(np.uint8)
         return [occ_res]
     
@@ -296,65 +318,7 @@ class BEVFusionStereo4DOCCNeRF(BEVFusionStereo4DOCC):
             if self.return_weights:
                 internal_feats_dict['render_weights'] = rendering_results[3]
         else:
-            render_depth, rgb_pred, semantic_pred = self.NeRFDecoder(
-                density_prob_flip, rgb_flip, semantic_flip, 
-                intricics, pose_spatial, True)
-            # torch.cuda.synchronize()
-            # end = time.time()
-            # print("inference time:", end - start)
-
-            # Upsample
-            batch_size, num_camera, _, H, W = rgb_pred.shape
-            depth_pred = F.interpolate(render_depth, size=[gt_depth.shape[-2], gt_depth.shape[-1]], mode="bilinear", align_corners=False)
-            rgb_pred = F.upsample_bilinear(rgb_pred.view(batch_size * num_camera, -1, H, W), size=[render_img_gt.shape[-2], render_img_gt.shape[-1]]).view(batch_size, num_camera, -1, render_img_gt.shape[-2], render_img_gt.shape[-1])
-            semantic_pred = F.upsample_bilinear(
-                semantic_pred.view(batch_size * num_camera, -1, H, W), 
-                size=[gt_depth.shape[-2], gt_depth.shape[-1]]).view(batch_size, num_camera, -1, gt_depth.shape[-2], gt_depth.shape[-1])
-
-            # Refine prediction
-            if self.refine_conv:
-                # depth_pred = depth_pred.view(batch_size * num_camera, -1, gt_depth.shape[-2], gt_depth.shape[-1])
-                rgb_pred = rgb_pred.view(batch_size * num_camera, -1, render_img_gt.shape[-2], render_img_gt.shape[-1])
-                semantic_pred = semantic_pred.view(
-                    batch_size * num_camera, 
-                    -1, 
-                    gt_depth.shape[-2], 
-                    gt_depth.shape[-1])
-
-                # depth_pred = self.depth_refine(depth_pred)
-                if self.NeRFDecoder.img_recon_head:
-                    rgb_pred = self.img_refine(rgb_pred)
-                if self.NeRFDecoder.semantic_head:
-                    semantic_pred = self.sem_refine(semantic_pred)
-
-                # depth_pred = depth_pred.view(batch_size, num_camera, gt_depth.shape[-2], gt_depth.shape[-1])
-                rgb_pred = rgb_pred.view(batch_size, num_camera, -1, render_img_gt.shape[-2], render_img_gt.shape[-1])
-                semantic_pred = semantic_pred.view(batch_size, num_camera, -1, gt_depth.shape[-2], gt_depth.shape[-1])
-
-            # nerf loss calculation
-            loss_nerf = self.NeRFDecoder.compute_depth_loss(depth_pred, render_gt_depth, render_gt_depth > 0.0)
-            if torch.isnan(loss_nerf):
-                print('NaN in DepthNeRF loss!')
-                loss_nerf = loss_depth
-            losses['loss_nerf'] = loss_nerf
-
-            if self.NeRFDecoder.semantic_head:
-                img_semantic = kwargs['img_semantic']
-                if self.num_random_view != -1:
-                    img_semantic = img_semantic[:, rand_ind]
-                loss_nerf_sem = self.NeRFDecoder.compute_semantic_loss(semantic_pred, img_semantic)
-                if torch.isnan(loss_nerf):
-                    print('NaN in SemNeRF loss!')
-                    loss_nerf_sem = loss_depth
-                losses['loss_nerf_sem'] = loss_nerf_sem
-
-            if self.NeRFDecoder.img_recon_head:
-                img_gts = render_img_gt.view(batch_size, num_camera, self.num_frame, -1, render_img_gt.shape[-2], render_img_gt.shape[-1])[:, :, 0]
-                loss_nerf_img = self.NeRFDecoder.compute_image_loss(rgb_pred, img_gts)
-                if torch.isnan(loss_nerf):
-                    print('NaN in ImgNeRF loss!')
-                    loss_nerf_img = loss_depth
-                losses['loss_nerf_img'] = loss_nerf_img
+            raise NotImplementedError
 
         return internal_feats_dict
         
