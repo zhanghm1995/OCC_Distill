@@ -303,9 +303,6 @@ class OccDistillHeadV1(BaseModule):
         assert mask is not None
 
         if self.use_cwd_loss:
-            mask2 = mask.reshape(-1)
-            num_total_samples2 = mask2.sum()
-            
             pred_S = student_feats_list[2]  # (b, h, w, d, c)
             pred_T = teacher_feats_list[2]
 

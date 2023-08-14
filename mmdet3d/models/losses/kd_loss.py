@@ -34,7 +34,8 @@ class CriterionCWD(nn.Module):
                  norm_type='none',
                  divergence='mse',
                  temperature=1.0,
-                 with_mask=False):
+                 with_mask=False,
+                 loss_weight=1.0):
     
         super(CriterionCWD, self).__init__()
        
@@ -60,8 +61,9 @@ class CriterionCWD(nn.Module):
             self.criterion = nn.KLDivLoss(reduction=reduction)
             self.temperature = temperature
         self.divergence = divergence
+        self.loss_weight = loss_weight
 
-    def forward(self,preds_S, preds_T, mask=None):
+    def forward(self, preds_S, preds_T, mask=None):
         
         n,c,h,w = preds_S.shape[:4]
         #import pdb;pdb.set_trace()
@@ -89,4 +91,4 @@ class CriterionCWD(nn.Module):
         else:
             loss /= n * h * w
 
-        return loss * (self.temperature**2)
+        return self.loss_weight * loss * (self.temperature**2)

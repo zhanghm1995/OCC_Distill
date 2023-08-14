@@ -29,7 +29,7 @@ model = dict(
             with_mask=True,
             norm_type='channel',
             divergence='kl',
-            temperature=4,)),
+            temperature=1.0,)),
 )
 
 optimizer = dict(type='AdamW', lr=2e-4, weight_decay=1e-2)
