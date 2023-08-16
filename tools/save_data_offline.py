@@ -4,7 +4,7 @@ Copyright (c) 2023 by Haiming Zhang. All Rights Reserved.
 Author: Haiming Zhang
 Date: 2023-07-26 09:57:35
 Email: haimingzhang@link.cuhk.edu.cn
-Description: Check the .pkl dataset files.
+Description: Save the data offline from the .pkl dataset files.
 '''
 
 import pickle
