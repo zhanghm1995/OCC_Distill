@@ -15,24 +15,6 @@ class_names = [
     'motorcycle', 'bicycle', 'pedestrian', 'traffic_cone'
 ]
 
-data_config = {
-    'cams': [
-        'CAM_FRONT_LEFT', 'CAM_FRONT', 'CAM_FRONT_RIGHT', 'CAM_BACK_LEFT',
-        'CAM_BACK', 'CAM_BACK_RIGHT'
-    ],
-    'Ncams':
-    6,
-    'input_size': (256, 704),
-    'src_size': (900, 1600),
-
-    # Augmentation
-    'resize': (-0.06, 0.11),
-    'rot': (-5.4, 5.4),
-    'flip': True,
-    'crop_h': (0.0, 0.0),
-    'resize_test': 0.00,
-}
-
 # Model
 point_cloud_range = [-40.0, -40.0, -1.0, 40.0, 40.0, 5.4]
 voxel_size = [0.05, 0.05, 0.05]
@@ -143,7 +125,7 @@ data = dict(
     workers_per_gpu=16,
     train=dict(
         data_root=data_root,
-        ann_file=data_root + 'bevdetv2-nuscenes_infos_train.pkl',
+        ann_file=data_root + 'bevdetv3-lidarseg-nuscenes_infos_train-quarter.pkl',
         pipeline=train_pipeline,
         classes=class_names,
         test_mode=False,
