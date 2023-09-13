@@ -71,7 +71,7 @@ class BEVFusionStereo4DOCCNeRF(BEVFusionStereo4DOCC):
         occ_score = occ_pred.softmax(-1)
         occ_res = occ_score.argmax(-1)
 
-        VISUALIZE = False
+        VISUALIZE = True
         if VISUALIZE:
             intricics = kwargs['intricics'][0]
             pose_spatial = kwargs['pose_spatial'][0]
@@ -88,7 +88,7 @@ class BEVFusionStereo4DOCCNeRF(BEVFusionStereo4DOCC):
                                         render_img_gt, 
                                         flip_dx, flip_dy,
                                         intricics, pose_spatial,
-                                        save_dir="./AAAI_visualization/debug")
+                                        save_dir="./AAAI_visualization/teacher-25-gt-depth")
             exit()
         
         occ_res = occ_res.squeeze(dim=0).cpu().numpy().astype(np.uint8)

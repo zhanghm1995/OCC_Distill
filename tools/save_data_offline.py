@@ -4,7 +4,7 @@ Copyright (c) 2023 by Haiming Zhang. All Rights Reserved.
 Author: Haiming Zhang
 Date: 2023-07-26 09:57:35
 Email: haimingzhang@link.cuhk.edu.cn
-Description: Check the .pkl dataset files.
+Description: Save the data offline from the .pkl dataset files.
 '''
 
 import pickle
@@ -45,13 +45,20 @@ def load_pickle(pickle_file_path):
 def sample_camera_images(anno_file, 
                          sample_idx=None,
                          save_root=None,
-                         need_sort_data=True):
+                         need_sort_data=True,
+                         need_camera_directory=True,
+                         save_mask_img=False):
     """Sample the camera images according to the sample_idx
-    from the dataset and save them to the directory.
+    from the dataset and save them to the specified directory.
 
     Args:
         anno_file (_type_): The .pkl file path.
         save_root (str, optional): The save root. Defaults to None.
+        need_camera_directory (bool): Whether save the images in the CAM_FRONT, CAM_BACK,
+            etc. directories.
+        need_sort_data (bool, optional): Whether to sort the data infos according
+            to the timestamp. When training in the BEVDet, it sorts the data by
+            default. Defaults to True.
     """
     with open(anno_file, "rb") as fp:
         dataset = pickle.load(fp)
@@ -72,13 +79,13 @@ def sample_camera_images(anno_file,
         filename = cam_data['data_path']
         cam_token = cam_data['sample_data_token']
         # print(filename, cam_token)
-        sam_mask_path = osp.join("./data/nuscenes/superpixels_sam", 
-                                 f"{cam_token}.png")
-
+        
         if save_root is not None:
             # create the camera image directory
-            os.makedirs(save_root, exist_ok=True)
-            cam_dir = osp.join(save_root, cam_name)
+            cam_dir = osp.join(save_root, cam_name) if need_camera_directory \
+                else save_root
+            # os.makedirs(save_root, exist_ok=True)
+            # cam_dir = osp.join(save_root, cam_name)
             os.makedirs(cam_dir, exist_ok=True)
 
             # copy the camera image to the directory
@@ -87,8 +94,65 @@ def sample_camera_images(anno_file,
             os.system(f"cp {filename} {cam_img_path}")
 
             # copy the semantic mask to the directory
-            sam_mask_dst_path = osp.join(cam_dir, f"{dst_file_name}_mask.png")
-            os.system(f"cp {sam_mask_path} {sam_mask_dst_path}")
+            if save_mask_img:
+                sam_mask_path = osp.join("./data/nuscenes/superpixels_sam", 
+                                         f"{cam_token}.png")
+                sam_mask_dst_path = osp.join(cam_dir, f"{dst_file_name}_mask.png")
+                os.system(f"cp {sam_mask_path} {sam_mask_dst_path}")
+
+
+def sample_camera_images_from_token(anno_file, 
+                                    sample_token,
+                                    save_root=None,
+                                    need_sort_data=True,
+                                    save_mask_img=False):
+    """Sample the camera images according to the sample_idx
+    from the dataset and save them to the directory.
+
+    Args:
+        anno_file (_type_): The .pkl file path.
+        save_root (str, optional): The save root. Defaults to None.
+        need_sort_data (bool, optional): Whether to sort the data infos according
+            to the timestamp. When training in the BEVDet, it sorts the data by
+            default. Defaults to True.
+    """
+    with open(anno_file, "rb") as fp:
+        dataset = pickle.load(fp)
+    
+    data_infos = dataset['infos']
+
+    if need_sort_data:
+        data_infos = list(sorted(data_infos, key=lambda e: e['timestamp']))
+    
+    for info in data_infos:
+        if info['token'] == sample_token:
+            break
+    print(info['token'])
+
+    cam_names = info['cams']
+    for cam_name in cam_names:
+        cam_data = cam_names[cam_name]
+        filename = cam_data['data_path']
+        cam_token = cam_data['sample_data_token']
+        # print(filename, cam_token)
+        
+        if save_root is not None:
+            # create the camera image directory
+            os.makedirs(save_root, exist_ok=True)
+            cam_dir = osp.join(save_root, cam_name)
+            os.makedirs(cam_dir, exist_ok=True)
+
+            # copy the camera image to the directory
+            dst_file_name = osp.splitext(osp.basename(filename))[0]
+            cam_img_path = osp.join(cam_dir, f"{dst_file_name}_image.jpg")
+            os.system(f"cp {filename} {cam_img_path}")
+
+            # copy the semantic mask to the directory
+            if save_mask_img:
+                sam_mask_path = osp.join("./data/nuscenes/superpixels_sam", 
+                                         f"{cam_token}.png")
+                sam_mask_dst_path = osp.join(cam_dir, f"{dst_file_name}_mask.png")
+                os.system(f"cp {sam_mask_path} {sam_mask_dst_path}")
 
 
 def save_all_cam_images(anno_file, save_root=None):
@@ -107,8 +171,6 @@ def save_all_cam_images(anno_file, save_root=None):
             cam_data = cam_names[cam_name]
             filename = cam_data['data_path']
             cam_token = cam_data['sample_data_token']
-            sam_mask_path = osp.join("./data/nuscenes/superpixels_sam", 
-                                    f"{cam_token}.png")
 
             if save_root is not None:
                 # create the camera image directory
@@ -151,9 +213,17 @@ def save_point_cloud(anno_file, sample_idx: int = None):
 
 
 if __name__ == "__main__":
-    # pickle_path = "data/nuscenes/bevdetv3-lidarseg-nuscenes_infos_train.pkl"
     pickle_path = "data/nuscenes/bevdetv3-lidarseg-nuscenes_infos_val.pkl"
-    sample_camera_images(pickle_path, sample_idx=4637, save_root="./AAAI_visualization")
+    sample_camera_images(pickle_path, 
+                         sample_idx=4165, 
+                         need_camera_directory=False,
+                         save_root="./AAAI_visualization/4165")
+    exit()
+
+    pickle_path = "data/nuscenes/bevdetv3-lidarseg-nuscenes_infos_train.pkl"
+    sample_camera_images_from_token(pickle_path,
+                                    '5abb17189643497f8600a187fb20aa55',
+                                     save_root="./AAAI_visualization/sample")
     exit()
 
     save_all_cam_images(pickle_path, save_root="./aaai_all_validation")

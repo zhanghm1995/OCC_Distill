@@ -13,6 +13,7 @@ from einops import rearrange, repeat
 from mmcv.runner import BaseModule
 from mmcv.cnn.bricks.conv_module import ConvModule
 from mmdet.models.builder import build_loss
+from mmdet3d.models.builder import build_loss as build_loss_3d
 from ..builder import HEADS
 from mmcv.runner import BaseModule
 
@@ -267,6 +268,55 @@ class OccDistillHead(BaseModule):
         return all_batch_affinity_loss.mean()
     
 
+@HEADS.register_module()
+class OccDistillHeadV1(BaseModule):
+    """We implement other new distillation methods in this 
+    class for ablation studies.
+
+    Args:
+        BaseModule (_type_): _description_
+    """
+
+    def __init__(self,
+                 use_cwd_loss=False,
+                 loss_cwd_criterion=dict(
+                    type='CriterionCWD',
+                    norm_type='channel',
+                    divergence='kl'),
+                 init_cfg=None,
+                 **kwargs):
+        
+        super(OccDistillHeadV1, self).__init__(init_cfg=init_cfg)
+        self.use_cwd_loss = use_cwd_loss
+        self.loss_cwd_criterion = build_loss_3d(loss_cwd_criterion)
+    
+    def loss(self, 
+             teacher_feats_list, 
+             student_feats_list,
+             use_distill_mask=True,
+             mask=None,
+             **kwargs):
+        
+        losses = dict()
+
+        assert use_distill_mask
+        assert mask is not None
+
+        if self.use_cwd_loss:
+            pred_S = student_feats_list[2]  # (b, h, w, d, c)
+            pred_T = teacher_feats_list[2]
+
+            pred_S = rearrange(pred_S, 'b h w d c -> b c h w d')
+            pred_T = rearrange(pred_T, 'b h w d c -> b c h w d')
+
+            mask_ = rearrange(mask, 'b h w d -> b 1 (h w d)')
+            loss = self.loss_cwd_criterion(
+                pred_S, pred_T, mask=mask_)
+
+            losses['prob_feat_loss'] = loss
+        return losses
+    
+    
 @HEADS.register_module()
 class OccDistillHeadV2(BaseModule):
     """The head for calculating the distillation loss.

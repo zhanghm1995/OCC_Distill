@@ -262,6 +262,8 @@ class NeRFDecoderHead(nn.Module):
             probs = probs.diff(dim=1, prepend=torch.zeros((rays_pts.shape[:1])).unsqueeze(1).to('cuda'))
             depth = (probs * interval).sum(-1)
 
+            np.save("ray_weight_probs_frame25_student.npy", probs.cpu().numpy())
+
             if force_render_rgb or self.img_recon_head:
                 rgb = self.grid_sampler(mask_rays_pts, rgb_recon)
                 rgb_cache = torch.zeros_like(rays_pts)
@@ -612,6 +614,11 @@ class NeRFDecoderHead(nn.Module):
 
                 camera_img = Image.fromarray(camera_img)
                 camera_img.save(save_camera_img_path)
+
+                ## save the depth map
+                rendered_depth = render[i]
+                save_depth_path = osp.join(save_dir, f"{i:02}_rendered_depth.npy")
+                np.save(save_depth_path, rendered_depth)
         else:
             plt.show()
 
