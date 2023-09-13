@@ -210,6 +210,12 @@ class BEVLidarOCC(CenterPoint):
             feats = rearrange(
                 feats, 'b (c Dimz) DimH DimW -> b c Dimz DimH DimW', Dimz=16)
         
+        H, W, D = 200, 200, 16
+        if feats.shape[2] != 16:
+            feats = nn.functional.interpolate(feats, size=(D, H, W), 
+                                              mode='trilinear', 
+                                              align_corners=True)
+        
         occ_pred = self.final_conv(feats).permute(0, 4, 3, 2, 1) # bncdhw->bnwhdc
         if self.use_predicter:
             occ_pred = self.predicter(occ_pred)
