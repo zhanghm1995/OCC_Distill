@@ -23,7 +23,18 @@ class BEVLidarOCC(CenterPoint):
     the original mmdetection3d classes, please use the below `LidarOCC` class.
 
     Args:
-        CenterPoint (_type_): _description_
+        pts_bev_encoder_backbone (_type_, optional): _description_. Defaults to None.
+        pts_bev_encoder_neck (_type_, optional): _description_. Defaults to None.
+        loss_occ (_type_, optional): _description_. Defaults to None.
+        lidar_out_dim (int, optional): _description_. Defaults to 32.
+        out_dim (int, optional): _description_. Defaults to 32.
+        use_mask (bool, optional): _description_. Defaults to True.
+        num_classes (int, optional): _description_. Defaults to 18.
+        use_predicter (bool, optional): _description_. Defaults to True.
+        use_free_occ_token (bool, optional): _description_. Defaults to False.
+        preprocess_occupancy (bool, optional): Whether to preprocess the occupancy 
+            like FBOCC does. Defaults to False.
+
     """
     def __init__(self, 
                  pts_bev_encoder_backbone=None,
@@ -35,6 +46,7 @@ class BEVLidarOCC(CenterPoint):
                  num_classes=18,
                  use_predicter=True, 
                  use_free_occ_token=False,
+                 preprocess_occupancy=False,
                  **kwargs):
         super(BEVLidarOCC, self).__init__(**kwargs)
         
@@ -69,6 +81,8 @@ class BEVLidarOCC(CenterPoint):
         
         self.use_mask = use_mask
         self.num_classes = num_classes
+        self.preprocess_occupancy = preprocess_occupancy
+
         self.loss_occ = build_loss(loss_occ)
 
     def loss_single(self, voxel_semantics, mask_camera, preds):
@@ -127,8 +141,16 @@ class BEVLidarOCC(CenterPoint):
             pts_feats = free_voxels * self.free_occ_token + (1 - free_voxels) * pts_feats
         
         occ_pred = self.occ_head(pts_feats)
-        occ_score=occ_pred.softmax(-1)
-        occ_res=occ_score.argmax(-1)
+        occ_score = occ_pred.softmax(-1)  # to (B, H, W, D, C)
+        
+        if self.preprocess_occupancy:
+            occ_score = occ_score[0]
+            occ_score = occ_score.permute(3, 2, 0, 1)
+            occ_score = torch.flip(occ_score, [2])
+            occ_score = torch.rot90(occ_score, -1, [2, 3])
+            occ_score = occ_score.permute(2, 3, 1, 0)
+
+        occ_res = occ_score.argmax(-1)
         occ_res = occ_res.squeeze(dim=0).cpu().numpy().astype(np.uint8)
         return [occ_res]
     

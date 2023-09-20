@@ -15,6 +15,8 @@ from mmdet.models.builder import build_loss
 from mmcv.cnn.bricks.conv_module import ConvModule
 from torch import nn
 import numpy as np
+import os
+import mmcv
 import torch.nn.functional as F
 from einops import repeat, rearrange
 from mmdet.core import multi_apply
@@ -129,6 +131,7 @@ class BEVStereo4DSSCOCC(BEVStereo4D):
                  use_predicter=True,
                  class_wise=False,
                  use_lovasz=True,
+                 occupancy_save_path=None,
                  **kwargs):
         
         super(BEVStereo4DSSCOCC, self).__init__(**kwargs)
@@ -154,6 +157,8 @@ class BEVStereo4DSSCOCC(BEVStereo4D):
         self.class_wise = class_wise
         self.align_after_view_transfromation = False
         self.loss_lovasz = Lovasz_loss(255)
+
+        self.occupancy_save_path = occupancy_save_path
 
     def loss_single(self, voxel_semantics, mask_camera, preds):
         loss_ = dict()
@@ -184,6 +189,15 @@ class BEVStereo4DSSCOCC(BEVStereo4D):
                     rescale=False,
                     **kwargs):
         """Test function without augmentaiton."""
+        sample_token = img_metas[0]['sample_idx']
+
+        if self.occupancy_save_path is not None:
+            save_path = os.path.join(self.occupancy_save_path, 
+                                     f'{sample_token}.npz')
+            if os.path.exists(save_path):
+                print("Load the saved occupancy prediction results.")
+                return [None]
+        
         img_feats, _, _ = self.extract_feat(
             points, img=img, img_metas=img_metas, **kwargs)
         occ_pred = self.final_conv(img_feats[0]).permute(0, 4, 3, 2, 1)
@@ -193,6 +207,15 @@ class BEVStereo4DSSCOCC(BEVStereo4D):
         occ_score = occ_pred.softmax(-1)
         occ_res = occ_score.argmax(-1)
         occ_res = occ_res.squeeze(dim=0).cpu().numpy().astype(np.uint8)
+
+        # For test server
+        if self.occupancy_save_path is not None:
+            mmcv.mkdir_or_exist(self.occupancy_save_path)
+
+            sample_token = img_metas[0]['sample_idx']
+            save_path = os.path.join(self.occupancy_save_path, 
+                                     f'{sample_token}.npz')
+            np.savez_compressed(save_path, occ_res)
         return [occ_res]
 
     def forward_train(self,

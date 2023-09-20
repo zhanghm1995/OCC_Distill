@@ -36,7 +36,54 @@ class LoadOccGTFromFile(object):
         results['mask_camera_free'] = mask_camera_free
 
         return results
+    
 
+@PIPELINES.register_module()
+class LoadOccGTFromFileFBOCC(object):
+    def __call__(self, results):
+        occ_gt_path = results['occ_gt_path']
+        occ_gt_path = os.path.join(occ_gt_path, "labels.npz")
+
+        occ_labels = np.load(occ_gt_path)
+        occupancy = torch.tensor(occ_labels['semantics'])
+        mask_lidar = occ_labels['mask_lidar']
+        mask_camera = occ_labels['mask_camera']
+
+        # to BEVDet format
+        occupancy = occupancy.permute(2, 0, 1)  # to (16, 200, 200)
+        occupancy = torch.rot90(occupancy, 1, [1, 2])
+        occupancy = torch.flip(occupancy, [1])
+        occupancy = occupancy.permute(1, 2, 0)
+
+        results['voxel_semantics'] = occupancy
+        results['mask_lidar'] = mask_lidar
+        results['mask_camera'] = mask_camera
+
+        results['scene_number'] = int(occ_gt_path.split('/')[4][-4:])
+
+        return results
+
+
+@PIPELINES.register_module()
+class PointsConditionalFlipFBOCC(object):
+
+    def __call__(self, results):
+        assert 'points' in results.keys()
+        
+        if 'points' in results:
+            ## NOTE: Here we need to rotate and flip the point cloud in advance to
+            ## conform to the convention of LoadOccupancy function.
+            points_ego = results['points']
+            new_points = points_ego.tensor.clone()
+            new_points[:, 0] = -points_ego.tensor[:, 1]  # x = -y
+            new_points[:, 1] = points_ego.tensor[:, 0]  # y = x
+            new_points[:, 2] = points_ego.tensor[:, 2]
+
+            results['points'] = points_ego.new_point(new_points)
+            results['points'].flip(bev_direction='vertical')
+
+        return results
+    
 
 @PIPELINES.register_module()
 class LoadLiDARSegGTFromFile(object):
