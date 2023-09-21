@@ -600,6 +600,95 @@ class BEVFusionStereo4DOCC(BEVStereo4DOCC):
         
 
 @DETECTORS.register_module()
+class BEVFusionOCCLidarSupervise(BEVFusionStereo4DOCC):
+    """Add the lidar branch supervision for the BEV fusion framework.
+
+    Args:
+        BEVStereo4DOCC (_type_): _description_
+    """
+
+    def __init__(self,
+                 **kwargs):
+        super(BEVFusionOCCLidarSupervise, self).__init__(**kwargs)
+        
+        out_channels = 32
+        lidar_channels = kwargs['lic']
+        num_classes = kwargs['num_classes']
+        self.lidar_conv = ConvModule(
+            lidar_channels,
+            out_channels,
+            kernel_size=3,
+            stride=1,
+            padding=1,
+            bias=True,
+            conv_cfg=dict(type='Conv3d'))
+        self.lidar_predictor = nn.Sequential(
+            nn.Linear(out_channels, out_channels*2),
+            nn.Softplus(),
+            nn.Linear(out_channels*2, num_classes),
+        )
+    
+    def loss_single(self,voxel_semantics, mask_camera, preds, name='loss_occ'):
+        assert voxel_semantics.min() >= 0 and voxel_semantics.max() <= 17
+
+        loss_ = dict()
+        voxel_semantics = voxel_semantics.long()
+        if self.use_mask:
+            mask_camera = mask_camera.to(torch.int32)
+            voxel_semantics=voxel_semantics.reshape(-1)
+            preds=preds.reshape(-1,self.num_classes)
+            mask_camera = mask_camera.reshape(-1)
+            num_total_samples=mask_camera.sum()
+            loss_occ=self.loss_occ(preds,voxel_semantics,mask_camera, avg_factor=num_total_samples)
+            loss_[name] = loss_occ
+        else:
+            voxel_semantics = voxel_semantics.reshape(-1)
+            preds = preds.reshape(-1, self.num_classes)
+            loss_occ = self.loss_occ(preds, voxel_semantics,)
+            loss_[name] = loss_occ
+        return loss_
+
+    def forward_train(self,
+                      points=None,
+                      img_metas=None,
+                      gt_bboxes_3d=None,
+                      gt_labels_3d=None,
+                      gt_labels=None,
+                      gt_bboxes=None,
+                      img_inputs=None,
+                      proposals=None,
+                      gt_bboxes_ignore=None,
+                      **kwargs):
+        img_feats, pts_feats, depth = self.extract_feat(
+            points, img=img_inputs, img_metas=img_metas, **kwargs)
+
+        ## lidar branch with supervision
+        lidar_feats = self.lidar_conv(pts_feats).permute(0, 4, 3, 2, 1)
+        lidar_pred = self.lidar_predictor(lidar_feats)
+
+        gt_depth = kwargs['gt_depth']
+        losses = dict()
+        loss_depth = self.img_view_transformer.get_depth_loss(gt_depth, depth)
+        losses['loss_depth'] = loss_depth
+
+        occ_pred = self.final_conv(img_feats[0]).permute(0, 4, 3, 2, 1) # bncdhw->bnwhdc
+        if self.use_predicter:
+            occ_pred = self.predicter(occ_pred)
+        voxel_semantics = kwargs['voxel_semantics']
+        mask_camera = kwargs['mask_camera']
+
+        loss_occ = self.loss_single(voxel_semantics, mask_camera, occ_pred)
+        losses.update(loss_occ)
+
+        ## add the lidar branch supervision
+        loss_occ_lidar = self.loss_single(voxel_semantics, mask_camera, 
+                                          lidar_pred, name='loss_occ_lidar')
+        losses.update(loss_occ_lidar)
+
+        return losses
+    
+
+@DETECTORS.register_module()
 class BEVFusionStereo4DOCCDistill(BEVFusionStereo4DOCC):
 
     def __init__(self,

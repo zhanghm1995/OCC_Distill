@@ -584,7 +584,7 @@ class SparseEncoderLidarOCC(SparseEncoder):
         # for detection head
         # [200, 176, 5] -> [200, 176, 2]
         out = self.conv_out(encode_features[-1])
-        spatial_features = out.dense()
+        spatial_features = out.dense()  # (B, C, Z, Y, X)
 
         return spatial_features
     
