@@ -103,6 +103,8 @@ class SparseEncoder(nn.Module):
             padding=0,
             indice_key='spconv_down2',
             conv_type='SparseConv3d')
+        
+        self.encoder_out_channels = encoder_out_channels
 
     @auto_fp16(apply_to=('voxel_features', ))
     def forward(self, voxel_features, coors, batch_size):
@@ -538,18 +540,9 @@ class SparseEncoderLidarOCC(SparseEncoder):
                          encoder_paddings,
                          block_type)
         
-        self.base_channels = base_channels
-        self.output_channels = output_channels
-        # Spconv init all weight on its own
-
-        encoder_out_channels = self.make_encoder_layers(
-            make_sparse_convmodule,
-            norm_cfg,
-            self.base_channels,
-            block_type=block_type)
-
+        # use the new conv_out layer
         self.conv_out = make_sparse_convmodule(
-            encoder_out_channels,
+            self.encoder_out_channels,
             self.output_channels,
             kernel_size=1,
             stride=1,
@@ -581,8 +574,6 @@ class SparseEncoderLidarOCC(SparseEncoder):
             x = encoder_layer(x)
             encode_features.append(x)
 
-        # for detection head
-        # [200, 176, 5] -> [200, 176, 2]
         out = self.conv_out(encode_features[-1])
         spatial_features = out.dense()  # (B, C, Z, Y, X)
 

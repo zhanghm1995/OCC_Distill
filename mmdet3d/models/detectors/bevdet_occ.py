@@ -12,6 +12,7 @@ import numpy as np
 from torch.nn import functional as F
 from einops import repeat, rearrange
 from mmdet.core import multi_apply
+from mmdet3d.models.model_utils.voxelization import VoxelizationWithMapping
 
 from .. import builder
 
@@ -686,7 +687,125 @@ class BEVFusionOCCLidarSupervise(BEVFusionStereo4DOCC):
         losses.update(loss_occ_lidar)
 
         return losses
+
+
+@DETECTORS.register_module()
+class BEVFusionOCCLidarSegSupervise(BEVFusionStereo4DOCC):
+    """Add the lidar branch semantic segmentation supervision for 
+    the BEV fusion framework.
+
+    Args:
+        BEVStereo4DOCC (_type_): _description_
+    """
+
+    def __init__(self,
+                 voxel_layer=None,
+                 **kwargs):
+        super(BEVFusionOCCLidarSegSupervise, self).__init__(**kwargs)
+        
+        out_channels = 32
+        lidar_channels = kwargs['lic']
+        num_classes = kwargs['num_classes']
+        self.lidar_conv = ConvModule(
+            lidar_channels,
+            out_channels,
+            kernel_size=3,
+            stride=1,
+            padding=1,
+            bias=True,
+            conv_cfg=dict(type='Conv3d'))
+        self.lidar_predictor = nn.Sequential(
+            nn.Linear(out_channels, out_channels*2),
+            nn.Softplus(),
+            nn.Linear(out_channels*2, num_classes),
+        )
+
+        self.voxelizer = VoxelizationWithMapping(**voxel_layer)
     
+    def loss_single(self,voxel_semantics, mask_camera, preds, name='loss_occ'):
+        assert voxel_semantics.min() >= 0 and voxel_semantics.max() <= 17
+
+        loss_ = dict()
+        voxel_semantics = voxel_semantics.long()
+        if self.use_mask:
+            mask_camera = mask_camera.to(torch.int32)
+            voxel_semantics=voxel_semantics.reshape(-1)
+            preds=preds.reshape(-1,self.num_classes)
+            mask_camera = mask_camera.reshape(-1)
+            num_total_samples=mask_camera.sum()
+            loss_occ=self.loss_occ(preds,voxel_semantics,mask_camera, avg_factor=num_total_samples)
+            loss_[name] = loss_occ
+        else:
+            voxel_semantics = voxel_semantics.reshape(-1)
+            preds = preds.reshape(-1, self.num_classes)
+            loss_occ = self.loss_occ(preds, voxel_semantics,)
+            loss_[name] = loss_occ
+        return loss_
+
+    def forward_train(self,
+                      points=None,
+                      img_metas=None,
+                      gt_bboxes_3d=None,
+                      gt_labels_3d=None,
+                      gt_labels=None,
+                      gt_bboxes=None,
+                      img_inputs=None,
+                      proposals=None,
+                      gt_bboxes_ignore=None,
+                      **kwargs):
+        img_feats, pts_feats, depth, sparse_feat = self.extract_feat(
+            points, img=img_inputs, img_metas=img_metas, **kwargs)
+
+        ## lidar branch with supervision
+        lidar_feats = self.lidar_conv(pts_feats).permute(0, 4, 3, 2, 1)
+        lidar_pred = self.lidar_predictor(lidar_feats)
+
+        gt_depth = kwargs['gt_depth']
+        losses = dict()
+        loss_depth = self.img_view_transformer.get_depth_loss(gt_depth, depth)
+        losses['loss_depth'] = loss_depth
+
+        occ_pred = self.final_conv(img_feats[0]).permute(0, 4, 3, 2, 1) # bncdhw->bnwhdc
+        if self.use_predicter:
+            occ_pred = self.predicter(occ_pred)
+        voxel_semantics = kwargs['voxel_semantics']
+        mask_camera = kwargs['mask_camera']
+
+        loss_occ = self.loss_single(voxel_semantics, mask_camera, occ_pred)
+        losses.update(loss_occ)
+
+        ## add the lidar branch supervision
+        indicies, indices_inv = self.voxelizer(points)
+        
+        loss_occ_lidar = self.loss_single(voxel_semantics, mask_camera, 
+                                          lidar_pred, name='loss_occ_lidar')
+        losses.update(loss_occ_lidar)
+
+        return losses
+
+    def extract_feat(self, points, img, img_metas, **kwargs):
+        """Extract features from images and points."""
+        img_feats, depth = self.extract_img_feat(img, img_metas, **kwargs)
+        pts_feats, sparse_feat = self.extract_pts_feat(points, img_feats, img_metas)
+
+        ## apply the lidar camera fusion
+        fusion_feats = self.apply_lc_fusion(img_feats[0], pts_feats)
+        return (fusion_feats, pts_feats, depth, sparse_feat)
+    
+    def extract_pts_feat(self, pts, img_feats=None, img_metas=None):
+        """Extract features of points."""
+        if not self.with_pts_backbone:
+            return None
+        voxels, num_points, coors = self.voxelize(pts)
+        voxel_features = self.pts_voxel_encoder(
+            voxels, num_points, coors)
+        batch_size = coors[-1, 0] + 1
+        x, sparse_feat = self.pts_middle_encoder(
+            voxel_features, coors, batch_size, return_sparse_feat=True)
+        x = self.pts_backbone(x)
+        if self.with_pts_neck:
+            x = self.pts_neck(x)
+        return x, sparse_feat
 
 @DETECTORS.register_module()
 class BEVFusionStereo4DOCCDistill(BEVFusionStereo4DOCC):

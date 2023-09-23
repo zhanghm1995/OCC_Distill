@@ -118,9 +118,8 @@ class VoxelizationWithMapping(nn.Module):
         batch_list = []
         for idx, pc in enumerate(points):
             pc = pc[:, :3]
-            mask = in_range_3d(pc, self.point_cloud_range)
-            
-            pc = pc[mask]
+            # mask = in_range_3d(pc, self.point_cloud_range)
+            # pc = pc[mask]
             points_list.append(pc)
             batch_list.append(torch.ones_like(pc[:, 0]) * idx)
         
