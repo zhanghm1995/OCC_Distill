@@ -25,12 +25,14 @@ class BEVDet(CenterPoint):
     """
 
     def __init__(self, img_view_transformer, img_bev_encoder_backbone,
-                 img_bev_encoder_neck, **kwargs):
+                 img_bev_encoder_neck, 
+                 use_3d_bev=False, **kwargs):
         super(BEVDet, self).__init__(**kwargs)
         self.img_view_transformer = builder.build_neck(img_view_transformer)
         self.img_bev_encoder_backbone = \
             builder.build_backbone(img_bev_encoder_backbone)
         self.img_bev_encoder_neck = builder.build_neck(img_bev_encoder_neck)
+        self.use_3d_bev = use_3d_bev
 
     def image_encoder(self, img, stereo=False):
         imgs = img
@@ -96,6 +98,12 @@ class BEVDet(CenterPoint):
         """Extract features from images and points."""
         img_feats, depth = self.extract_img_feat(img, img_metas, **kwargs)
         pts_feats = None
+
+        if self.use_3d_bev:
+            img_feats_tmp = img_feats[0]
+            bs, c, z, y, x = img_feats_tmp.shape
+            img_feats_tmp = img_feats_tmp.view(bs, -1, y, x)
+            img_feats = [img_feats_tmp]
         return (img_feats, pts_feats, depth)
 
     def forward_train(self,
