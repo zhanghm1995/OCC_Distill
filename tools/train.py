@@ -222,6 +222,11 @@ def main():
         test_cfg=cfg.get('test_cfg'))
     model.init_weights()
 
+    sync_bn = cfg.get('sync_bn', False)
+    if distributed and sync_bn:
+        model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
+        print('Convert to SyncBatchNorm!!!!!!!!!!!!!!!')
+
     # logger.info(f'Model:\n{model}')
     datasets = [build_dataset(cfg.data.train)]
     if len(cfg.workflow) == 2:
