@@ -140,6 +140,40 @@ class OccSimpleHead(BaseModule):
 
 
 @HEADS.register_module()
+class OccVisiblityHead(OccSimpleHead):
+
+    def __init__(self,
+                 **kwargs):
+        
+        super(OccVisiblityHead, self).__init__(**kwargs)
+
+    def forward_train(self, 
+                      inputs, 
+                      **kwargs):
+        """Forward function for training.
+
+        Args:
+            inputs (list[torch.Tensor]): List of multi-level point features.
+            voxel_semantics (torch.Tensor): The GT semantic voxesl.
+            train_cfg (dict): The training config.
+
+        Returns:
+            dict[str, Tensor]: a dictionary of loss components
+        """
+        preds = self.forward(inputs)
+        
+        target_visibility_mask = kwargs['mask_lidar'].long()
+
+        losses = dict()
+        target_visibility_mask = target_visibility_mask.reshape(-1)
+        preds = preds.reshape(-1, self.num_classes)
+        loss_occ = self.loss_occ(preds, target_visibility_mask)
+        losses['loss_occ'] = loss_occ
+
+        return losses
+    
+
+@HEADS.register_module()
 class OccDistillHead(BaseModule):
     """The head for calculating the distillation loss.
 
