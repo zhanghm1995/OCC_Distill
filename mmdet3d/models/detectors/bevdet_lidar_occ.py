@@ -497,6 +497,10 @@ class LidarOCC(CenterPoint):
         if not self.with_occ_head:
             return pts_feats
         
+        if self.use_binary_occupacy:
+            occ = self.occ_head.get_occ(pts_feats, img_metas, **kwargs)
+            return [occ]
+        
         occ_pred = self.occ_head(pts_feats)
         occ_score = occ_pred.softmax(-1)
         occ_res = occ_score.argmax(-1)
