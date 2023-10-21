@@ -263,8 +263,62 @@ def save_point_cloud(anno_file, sample_idx: int = None):
     np.savetxt(save_path, points[:, :3])
 
 
+def save_scene_sequence_image(anno_file):
+    with open(anno_file, "rb") as fp:
+        dataset = pickle.load(fp)
+    
+    data_infos = dataset['infos']
+    curr_info = data_infos[100]
+
+    data_infos = list(sorted(data_infos, key=lambda e: e['timestamp']))
+    print('Done')
+
+    total_scene_seq = []
+    curr_seq = []
+    for idx, data in tqdm(enumerate(data_infos)):
+        scene_token = data['scene_token']
+        pre_idx = max(idx - 1, 0)
+        pre_scene_token = data_infos[pre_idx]['scene_token']
+
+        if scene_token != pre_scene_token:
+            total_scene_seq.append(curr_seq)
+            curr_seq = [data]
+        else:
+            curr_seq.append(data)
+
+        if idx == len(data_infos) - 1:
+            total_scene_seq.append(curr_seq)
+
+    cam_img_size = [800, 450]  # [w, h]
+    # save the first scene sequence
+    curr_seq = total_scene_seq[0]
+    for frame in curr_seq:
+        cam_names = frame['cams']
+        for cam_name in cam_names:
+            cam_data = cam_names[cam_name]
+            filename = cam_data['data_path']
+            cam_token = cam_data['sample_data_token']
+
+            # create the camera image directory
+            cam_dir = osp.join("./results/visualization/valiation_scene_seq", 
+                               cam_name, 'color')
+            os.makedirs(cam_dir, exist_ok=True)
+
+            # copy the camera image to the directory
+            cam_img_resized = Image.open(filename).resize(
+                cam_img_size, Image.BILINEAR)
+            
+            dst_file_name = osp.splitext(osp.basename(filename))[0]
+            cam_img_path = osp.join(cam_dir, f"{dst_file_name}_image.jpg")
+            cam_img_resized.save(cam_img_path)
+
+
+
 if __name__ == "__main__":
     pickle_path = "data/nuscenes/bevdetv3-lidarseg-nuscenes_infos_val.pkl"
+    save_scene_sequence_image(pickle_path)
+    exit(0)
+
     save_all_cam_cat_images(pickle_path, save_root="./aaai_all_validation_cat_debug")
     exit(0)
 
