@@ -81,21 +81,23 @@ def link_all_scene_sequence_images(anno_file):
     curr_seq = []
     for idx, data in tqdm(enumerate(data_infos)):
         scene_token = data['scene_token']
-        pre_idx = max(idx - 1, 0)
-        pre_scene_token = data_infos[pre_idx]['scene_token']
+        next_idx = min(idx + 1, len(data_infos) - 1)
+        next_scene_token = data_infos[next_idx]['scene_token']
 
-        if scene_token != pre_scene_token:
+        curr_seq.append(data)
+
+        if next_scene_token != scene_token:
             total_scene_seq.append(curr_seq)
             scene_name_list.append(scene_token)
-            curr_seq = [data]
-        else:
-            curr_seq.append(data)
+            curr_seq = []
 
         if idx == len(data_infos) - 1:
             total_scene_seq.append(curr_seq)
             scene_name_list.append(scene_token)
 
-    print(len(total_scene_seq), len(scene_name_list))
+    print(len(total_scene_seq))
+    scene_length = [len(seq) for seq in total_scene_seq]
+    print(np.min(scene_length), np.max(scene_length))
 
     data_root_relative = "./data/nuscenes"
     data_root_abs = "/data2/dataset/nuscenes"
