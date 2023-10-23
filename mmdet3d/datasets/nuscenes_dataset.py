@@ -232,6 +232,7 @@ class NuScenesDataset(Custom3DDataset):
         info = self.data_infos[index]
         # standard protocol modified from SECOND.Pytorch
         input_dict = dict(
+            data_index=index,
             sample_idx=info['token'],
             pts_filename=info['lidar_path'],
             sweeps=info['sweeps'],
