@@ -241,7 +241,7 @@ class BEVStereo4DOCCNeRFRretrain(BEVStereo4D):
         render_gt_depth = kwargs['render_gt_depth']
 
         # occupancy prediction
-        occ_pred = self.final_conv(img_feats[0]).permute(0, 4, 3, 2, 1)  # bncdhw->bnwhdc
+        occ_pred = self.final_conv(img_feats[0]).permute(0, 4, 3, 2, 1)  # to (b, 200, 200, 16, c)
         if self.use_predicter:
             occ_pred = self.predicter(occ_pred)
 
@@ -277,7 +277,7 @@ class BEVStereo4DOCCNeRFRretrain(BEVStereo4D):
             exit()
 
         else:
-            occ_pred = occ_pred.permute(0, 4, 1, 2, 3)
+            occ_pred = occ_pred.permute(0, 4, 1, 2, 3)  # to (B, c, 200, 200, 16)
 
             # semantic
             if self.NeRFDecoder.semantic_head:
