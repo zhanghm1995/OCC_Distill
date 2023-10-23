@@ -75,7 +75,7 @@ model = dict(
     ## the nerf decoder head
     nerf_head=dict(
         type='NeRFDecoderHead',
-        num_random_view=-1,
+        num_random_view=3,
         mask_render=False,
         img_recon_head=False,
         semantic_head=True,

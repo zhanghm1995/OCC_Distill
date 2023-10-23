@@ -616,7 +616,7 @@ class BEVStereo4DOCCTemporalNeRFPretrain(BEVStereo4DOCCNeRFRretrain):
             # random view selection
             if self.num_random_view != -1:
                 rand_ind = torch.multinomial(
-                    torch.tensor([1/self.num_random_view]*self.num_random_view), 
+                    torch.tensor([1 / self.num_random_view] * 6), 
                     self.num_random_view, 
                     replacement=False)
                 intricics = intricics[:, rand_ind]
@@ -733,10 +733,6 @@ class BEVStereo4DOCCTemporalNeRFPretrain(BEVStereo4DOCCNeRFRretrain):
 
                 if self.NeRFDecoder.semantic_head:
                     ## compare the temporal rendering semantic map
-                    img_semantic = kwargs['img_semantic']
-                    if self.num_random_view != -1:
-                        img_semantic = img_semantic[:, rand_ind]
-                    
                     semantic_pred = rearrange(
                         semantic_pred, 
                         '(b seq) num_cam c h w -> seq b num_cam c h w', b=bs_ori)
