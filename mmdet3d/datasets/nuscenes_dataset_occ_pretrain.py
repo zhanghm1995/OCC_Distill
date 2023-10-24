@@ -46,7 +46,7 @@ class NuScenesDatasetOccPretrain(NuScenesDatasetOccpancy):
             else:
                 output.append(deepcopy(data))
 
-            if any(output) is None:
+            if any([x is None for x in output]):
                 idx = self._rand_another(idx)
                 continue
 

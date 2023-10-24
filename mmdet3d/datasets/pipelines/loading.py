@@ -1589,8 +1589,10 @@ class PrepareImageInputsForNeRF(object):
 
         return img, post_rot, post_tran
 
-    def img_transform_core(self, img: Image, 
-                           resize_dims, crop, flip, rotate,
+    def img_transform_core(self, 
+                           img: Image, 
+                           resize_dims, 
+                           crop, flip, rotate,
                            resample=None):
         # adjust image
         img = img.resize(resize_dims, resample)
@@ -1851,21 +1853,11 @@ class LoadInstanceMaskFromFile(PrepareImageInputsForNeRF):
 
                 # resize the instance mask to the same size as the image,
                 # NOTE: here we donot apply any augmentations to the instance mask
-                img_non_aug = self.sample_noaugmentation(
-                    H=instance_img.height, W=instance_img.width)
-                
-                post_rot = torch.eye(2)
-                post_tran = torch.zeros(2)
-                instance_img, post_rot2_wo_aug, post_tran2_wo_aug = \
-                    self.img_transform(instance_img, 
-                                       post_rot,
-                                       post_tran,
-                                       resize=img_non_aug[0],
-                                       resize_dims=img_non_aug[1],
-                                       crop=img_non_aug[2],
-                                       flip=img_non_aug[3],
-                                       rotate=img_non_aug[4],
-                                       resample=Image.Resampling.NEAREST)
+                instance_img = self.img_transform_core(
+                    instance_img, 
+                    self.data_config.render_size[::-1], 
+                    None, False, None,
+                    resample=Image.Resampling.NEAREST)
                 instance_img = torch.from_numpy(np.array(instance_img))
                 instance_imgs.append(instance_img)
 
@@ -1880,7 +1872,8 @@ class LoadInstanceMaskFromFile(PrepareImageInputsForNeRF):
                         instance_img_adjacent = self.img_transform_core(
                             instance_img_adjacent, 
                             self.data_config.render_size[::-1],
-                            None, False, None)
+                            None, False, None,
+                            resample=Image.Resampling.NEAREST)
                         
                         instance_img_adjacent = torch.from_numpy(np.array(instance_img_adjacent))
                         instance_imgs.append(instance_img_adjacent)
