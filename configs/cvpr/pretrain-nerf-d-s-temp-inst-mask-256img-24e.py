@@ -2,9 +2,9 @@
 Copyright (c) 2023 by Haiming Zhang. All Rights Reserved.
 
 Author: Haiming Zhang
-Date: 2023-10-23 14:29:35
+Date: 2023-10-23 19:18:43
 Email: haimingzhang@link.cuhk.edu.cn
-Description: Using the temporal constrastive learning to pretrain the BEVDet-OCC network.
+Description: Using the instance masks to add the contrastive learning.
 '''
 
 _base_ = ['../_base_/datasets/nus-3d.py', '../_base_/default_runtime.py']
@@ -128,6 +128,10 @@ model = dict(
 
     loss_compare=dict(type='MSELoss', 
                       loss_weight=1.0),
+    pretrain_head=dict(
+        type='NeRFOccPretrainHead',
+        semantic_align_type='query_fixed', 
+    )
 )
 
 # Data
@@ -166,10 +170,15 @@ train_pipeline = [
          render_size=data_config['render_size'],
          render_scale=[data_config['render_size'][0]/data_config['src_size'][0], 
                        data_config['render_size'][1]/data_config['src_size'][1]]),
+    dict(type='LoadInstanceMaskFromFile',
+         is_train=True,
+         data_config=data_config,
+         sequential=False,
+         instance_mask_dir='data/nuscenes/superpixels_sam'),
     dict(type='DefaultFormatBundle3D', class_names=class_names),
     dict(
         type='Collect3D', keys=['img_inputs', 'gt_depth', 
-                                'img_semantic',
+                                'img_semantic', 'instance_masks',
                                 'intricics', 'pose_spatial', 
                                 'flip_dx', 'flip_dy', 
                                 'render_gt_img', 'render_gt_depth'])

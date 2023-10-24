@@ -428,11 +428,13 @@ class BEVStereo4DOCCTemporalNeRFPretrain(BEVStereo4DOCCNeRFRretrain):
 
     def __init__(self,
                  loss_compare=None,
+                 pretrain_head=None,
                  **kwargs):
         
         super(BEVStereo4DOCCTemporalNeRFPretrain, self).__init__(**kwargs)
 
         self.loss_compare = build_loss(loss_compare)
+        self.pretrain_head = builder.build_head(pretrain_head)
 
     def simple_test(self,
                     points,
@@ -514,6 +516,9 @@ class BEVStereo4DOCCTemporalNeRFPretrain(BEVStereo4DOCCNeRFRretrain):
     def reshape_kwargs(self, batch):
         output = {}
         for key, value in batch.items():
+            if key == 'instance_selected_points':
+                output[key] = value
+                continue
             if len(value.shape) == 2:
                 output[key] = value.view(-1)
             else:
@@ -564,7 +569,8 @@ class BEVStereo4DOCCTemporalNeRFPretrain(BEVStereo4DOCCNeRFRretrain):
             occ_pred = occ_pred[..., :-3]
 
         # NeRF loss
-        if False:  # DEBUG ONLY!
+        VISUALIZE = False
+        if VISUALIZE:  # DEBUG ONLY!
             density_prob = kwargs['voxel_semantics'].unsqueeze(1)
             # img_semantic = kwargs['img_semantic']
             density_prob = density_prob != 17
@@ -590,156 +596,115 @@ class BEVStereo4DOCCTemporalNeRFPretrain(BEVStereo4DOCCNeRFRretrain):
             self.NeRFDecoder.visualize_image_depth_pair(current_frame_img, render_gt_depth[0], render_depth[0])
             exit()
 
+        occ_pred = occ_pred.permute(0, 4, 1, 2, 3)  # to (B, c, 200, 200, 16)
+
+        # semantic
+        if self.NeRFDecoder.semantic_head:
+            semantic = occ_pred[:, :self.NeRFDecoder.semantic_dim, ...]
         else:
-            occ_pred = occ_pred.permute(0, 4, 1, 2, 3)  # to (B, c, 200, 200, 16)
+            semantic = torch.zeros_like(occ_pred)
 
-            # semantic
+        # density
+        density_prob = -occ_pred[:, self.NeRFDecoder.semantic_dim: self.NeRFDecoder.semantic_dim+1, ...]
+
+        # image reconstruction
+        if self.NeRFDecoder.img_recon_head:
+            rgb_recons = occ_pred[:, -4:-1, ...]
+        else:
+            rgb_recons = torch.zeros_like(density_prob)
+
+        # cancel the effect of flip augmentation
+        rgb_flip = self.inverse_flip_aug(rgb_recons, flip_dx, flip_dy)
+        semantic_flip = self.inverse_flip_aug(semantic, flip_dx, flip_dy)
+        density_prob_flip = self.inverse_flip_aug(density_prob, flip_dx, flip_dy)
+
+        # random view selection
+        if self.num_random_view != -1:
+            rand_ind = torch.multinomial(
+                torch.tensor([1 / self.num_random_view] * 6), 
+                self.num_random_view, 
+                replacement=False)
+            intricics = intricics[:, rand_ind]
+            pose_spatial = pose_spatial[:, rand_ind]
+            render_gt_depth = render_gt_depth[:, rand_ind]
+            render_img_gt = render_img_gt[:, rand_ind]
+
+        # rendering
+        # import time
+        # torch.cuda.synchronize()
+        # start = time.time()
+        if self.NeRFDecoder.mask_render:
+            render_mask = render_gt_depth > 0.0
+            render_depth, rgb_pred, semantic_pred = self.NeRFDecoder(
+                density_prob_flip, rgb_flip, semantic_flip, 
+                intricics, pose_spatial, True, render_mask)
+            torch.cuda.synchronize()
+            # end = time.time()
+            # print("inference time:", end - start)
+
+            render_gt_depth = render_gt_depth[render_mask]
+            loss_nerf = self.NeRFDecoder.compute_depth_loss(
+                render_depth, render_gt_depth, render_gt_depth > 0.0)
+            if torch.isnan(loss_nerf):
+                print('NaN in DepthNeRF loss!')
+                loss_nerf = loss_depth
+            losses['loss_nerf'] = loss_nerf
+
             if self.NeRFDecoder.semantic_head:
-                semantic = occ_pred[:, :self.NeRFDecoder.semantic_dim, ...]
-            else:
-                semantic = torch.zeros_like(occ_pred)
-
-            # density
-            density_prob = -occ_pred[:, self.NeRFDecoder.semantic_dim: self.NeRFDecoder.semantic_dim+1, ...]
-
-            # image reconstruction
-            if self.NeRFDecoder.img_recon_head:
-                rgb_recons = occ_pred[:, -4:-1, ...]
-            else:
-                rgb_recons = torch.zeros_like(density_prob)
-
-            # cancel the effect of flip augmentation
-            rgb_flip = self.inverse_flip_aug(rgb_recons, flip_dx, flip_dy)
-            semantic_flip = self.inverse_flip_aug(semantic, flip_dx, flip_dy)
-            density_prob_flip = self.inverse_flip_aug(density_prob, flip_dx, flip_dy)
-
-            # random view selection
-            if self.num_random_view != -1:
-                rand_ind = torch.multinomial(
-                    torch.tensor([1 / self.num_random_view] * 6), 
-                    self.num_random_view, 
-                    replacement=False)
-                intricics = intricics[:, rand_ind]
-                pose_spatial = pose_spatial[:, rand_ind]
-                render_gt_depth = render_gt_depth[:, rand_ind]
-                render_img_gt = render_img_gt[:, rand_ind]
-
-            # rendering
-            # import time
-            # torch.cuda.synchronize()
-            # start = time.time()
-            if self.NeRFDecoder.mask_render:
-                render_mask = render_gt_depth > 0.0
-                render_depth, rgb_pred, semantic_pred = self.NeRFDecoder(
-                    density_prob_flip, rgb_flip, semantic_flip, 
-                    intricics, pose_spatial, True, render_mask)
-                torch.cuda.synchronize()
-                # end = time.time()
-                # print("inference time:", end - start)
-
-                render_gt_depth = render_gt_depth[render_mask]
-                loss_nerf = self.NeRFDecoder.compute_depth_loss(
-                    render_depth, render_gt_depth, render_gt_depth > 0.0)
+                img_semantic = kwargs['img_semantic']
+                img_semantic = img_semantic[render_mask]
+                loss_nerf_sem = self.NeRFDecoder.compute_semantic_loss_flatten(
+                    semantic_pred, img_semantic, lovasz=self.lovasz)
                 if torch.isnan(loss_nerf):
-                    print('NaN in DepthNeRF loss!')
-                    loss_nerf = loss_depth
-                losses['loss_nerf'] = loss_nerf
+                    print('NaN in SemNeRF loss!')
+                    loss_nerf_sem = loss_depth
+                losses['loss_nerf_sem'] = loss_nerf_sem
 
-                if self.NeRFDecoder.semantic_head:
-                    img_semantic = kwargs['img_semantic']
-                    img_semantic = img_semantic[render_mask]
-                    loss_nerf_sem = self.NeRFDecoder.compute_semantic_loss_flatten(
-                        semantic_pred, img_semantic, lovasz=self.lovasz)
-                    if torch.isnan(loss_nerf):
-                        print('NaN in SemNeRF loss!')
-                        loss_nerf_sem = loss_depth
-                    losses['loss_nerf_sem'] = loss_nerf_sem
+            if self.NeRFDecoder.img_recon_head:
+                batch_size, num_camera = intricics.shape[:2]
+                img_gts = render_img_gt.view(
+                    batch_size, num_camera, self.num_frame, -1, 
+                    render_img_gt.shape[-2], render_img_gt.shape[-1])[:, :, 0]
+                img_gts = img_gts.permute(0, 1, 3, 4, 2)[render_mask]
+                loss_nerf_img = self.NeRFDecoder.compute_image_loss(
+                    rgb_pred, img_gts)
+                if torch.isnan(loss_nerf):
+                    print('NaN in ImgNeRF loss!')
+                    loss_nerf_img = loss_depth
+                losses['loss_nerf_img'] = loss_nerf_img
 
-                if self.NeRFDecoder.img_recon_head:
-                    batch_size, num_camera = intricics.shape[:2]
-                    img_gts = render_img_gt.view(
-                        batch_size, num_camera, self.num_frame, -1, 
-                        render_img_gt.shape[-2], render_img_gt.shape[-1])[:, :, 0]
-                    img_gts = img_gts.permute(0, 1, 3, 4, 2)[render_mask]
-                    loss_nerf_img = self.NeRFDecoder.compute_image_loss(
-                        rgb_pred, img_gts)
-                    if torch.isnan(loss_nerf):
-                        print('NaN in ImgNeRF loss!')
-                        loss_nerf_img = loss_depth
-                    losses['loss_nerf_img'] = loss_nerf_img
+        else:  # rendering the whole images
+            render_depth, rgb_pred, semantic_pred = self.NeRFDecoder(
+                density_prob_flip, rgb_flip, 
+                semantic_flip, intricics, pose_spatial, True)
+            # torch.cuda.synchronize()
+            # end = time.time()
+            # print("inference time:", end - start)
 
-            else:
-                render_depth, rgb_pred, semantic_pred = self.NeRFDecoder(
-                    density_prob_flip, rgb_flip, 
-                    semantic_flip, intricics, pose_spatial, True)
-                # torch.cuda.synchronize()
-                # end = time.time()
-                # print("inference time:", end - start)
+            # nerf loss calculation
+            # loss_nerf = self.NeRFDecoder.compute_depth_loss(
+            #     depth_pred, render_gt_depth, render_gt_depth > 0.0)
+            # if torch.isnan(loss_nerf):
+            #     print('NaN in DepthNeRF loss!')
+            #     loss_nerf = loss_depth
+            # losses['loss_nerf'] = loss_nerf
 
-                # Upsample
-                batch_size, num_camera, _, H, W = rgb_pred.shape
-                depth_pred = F.interpolate(render_depth, 
-                                           size=[gt_depth.shape[-2], 
-                                                 gt_depth.shape[-1]], 
-                                           mode="bilinear", 
-                                           align_corners=False)
-                rgb_pred = F.upsample_bilinear(rgb_pred.view(batch_size * num_camera, -1, H, W), 
-                                               size=[render_img_gt.shape[-2], 
-                                                     render_img_gt.shape[-1]]).view(batch_size, num_camera, -1, render_img_gt.shape[-2], render_img_gt.shape[-1])
-                semantic_pred = F.upsample_bilinear(
-                    semantic_pred.view(batch_size * num_camera, -1, H, W), 
-                    size=[gt_depth.shape[-2], 
-                          gt_depth.shape[-1]]).view(batch_size, 
-                                                    num_camera, 
-                                                    -1, 
-                                                    gt_depth.shape[-2], 
-                                                    gt_depth.shape[-1])
+            feats_dict = dict()
+            if self.NeRFDecoder.semantic_head:
+                feats_dict['render_semantic'] = semantic_pred
+                ## compare the temporal rendering semantic map
+                # semantic_pred = rearrange(
+                #     semantic_pred, 
+                #     '(b seq) num_cam c h w -> seq b num_cam c h w', b=bs_ori)
+                # loss_nerf_sem = self.loss_compare(
+                #     semantic_pred[0], semantic_pred[1])
+                # if torch.isnan(loss_nerf_sem):
+                #     print('NaN in SemNeRF loss!')
+                # losses['loss_nerf_sem'] = loss_nerf_sem
 
-                # Refine prediction
-                if self.refine_conv:
-                    # depth_pred = depth_pred.view(batch_size * num_camera, -1, gt_depth.shape[-2], gt_depth.shape[-1])
-                    rgb_pred = rgb_pred.view(batch_size * num_camera, 
-                                             -1, 
-                                             render_img_gt.shape[-2], 
-                                             render_img_gt.shape[-1])
-                    semantic_pred = semantic_pred.view(batch_size * num_camera, 
-                                                       -1, 
-                                                       gt_depth.shape[-2], 
-                                                       gt_depth.shape[-1])
 
-                    # depth_pred = self.depth_refine(depth_pred)
-                    if self.NeRFDecoder.img_recon_head:
-                        rgb_pred = self.img_refine(rgb_pred)
-                    if self.NeRFDecoder.semantic_head:
-                        semantic_pred = self.sem_refine(semantic_pred)
-
-                    # depth_pred = depth_pred.view(batch_size, num_camera, gt_depth.shape[-2], gt_depth.shape[-1])
-                    rgb_pred = rgb_pred.view(batch_size, 
-                                             num_camera, 
-                                             -1, 
-                                             render_img_gt.shape[-2], 
-                                             render_img_gt.shape[-1])
-                    semantic_pred = semantic_pred.view(batch_size, num_camera, 
-                                                       -1, gt_depth.shape[-2], 
-                                                       gt_depth.shape[-1])
-
-                # nerf loss calculation
-                # loss_nerf = self.NeRFDecoder.compute_depth_loss(
-                #     depth_pred, render_gt_depth, render_gt_depth > 0.0)
-                # if torch.isnan(loss_nerf):
-                #     print('NaN in DepthNeRF loss!')
-                #     loss_nerf = loss_depth
-                # losses['loss_nerf'] = loss_nerf
-
-                if self.NeRFDecoder.semantic_head:
-                    ## compare the temporal rendering semantic map
-                    semantic_pred = rearrange(
-                        semantic_pred, 
-                        '(b seq) num_cam c h w -> seq b num_cam c h w', b=bs_ori)
-                    loss_nerf_sem = self.loss_compare(
-                        semantic_pred[0], semantic_pred[1])
-                    if torch.isnan(loss_nerf_sem):
-                        print('NaN in SemNeRF loss!')
-                    losses['loss_nerf_sem'] = loss_nerf_sem
+            losses = self.pretrain_head.loss(feats_dict, 
+                                             rand_view_idx=rand_ind, 
+                                             **kwargs)
 
         return losses

@@ -1883,6 +1883,7 @@ class LoadInstanceMaskFromFile(PrepareImageInputsForNeRF):
         
         instance_imgs = torch.stack(instance_imgs)
         results['instance_masks'] = instance_imgs.to(torch.long)
+        return results
             
 
 @PIPELINES.register_module()
