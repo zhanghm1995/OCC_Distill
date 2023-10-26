@@ -26,21 +26,20 @@ def get_scene_sequence_data(data_infos):
     scene_name_list = []
     total_scene_seq = []
     curr_seq = []
-    for idx, data in tqdm(enumerate(data_infos)):
+    for idx, data in enumerate(data_infos):
         scene_token = data['scene_token']
-        pre_idx = max(idx - 1, 0)
-        pre_scene_token = data_infos[pre_idx]['scene_token']
+        next_idx = min(idx + 1, len(data_infos) - 1)
+        next_scene_token = data_infos[next_idx]['scene_token']
 
-        if scene_token != pre_scene_token:
+        curr_seq.append(data)
+
+        if next_scene_token != scene_token:
             total_scene_seq.append(curr_seq)
             scene_name_list.append(scene_token)
-            curr_seq = [data]
-        else:
-            curr_seq.append(data)
+            curr_seq = []
 
-        if idx == len(data_infos) - 1:
-            total_scene_seq.append(curr_seq)
-            scene_name_list.append(scene_token)
+    total_scene_seq.append(curr_seq)
+    scene_name_list.append(scene_token)
     return scene_name_list, total_scene_seq
 
 
@@ -125,7 +124,7 @@ def project_points_to_image(points_lidar, lidar2img, height, width,
     coor, depth, ranks = coor[sort], depth[sort], ranks[sort]
 
     kept2 = torch.ones(coor.shape[0], device=coor.device, dtype=torch.bool)
-    kept2[1:] = torch.abs(ranks[1:] - ranks[:-1]) > 0.1
+    kept2[1:] = (ranks[1:] != ranks[:-1])
     coor, depth = coor[kept2], depth[kept2]
     coor = coor.to(torch.long)
     depth_map[coor[:, 1], coor[:, 0]] = depth
@@ -254,6 +253,8 @@ def process_one_scene(scene_name, scene_seq, neighbor_length=3,
     scene_save_dir = osp.join(save_dir, scene_name)
     os.makedirs(scene_save_dir, exist_ok=True)
 
+    # sample_token_list = [frame['token'] for frame in scene_seq]
+
     for i in range(num_frames - 1):
         for j in range(i + 1, min(i + 1 + neighbor_length, num_frames)):
             frame1 = scene_seq[i]
@@ -267,8 +268,8 @@ def process_one_scene(scene_name, scene_seq, neighbor_length=3,
             frame1 = scene_seq[i]
             frame2 = scene_seq[j]
             process_two_frames(frame1, frame2, 
-                                choose_cams, 
-                                scene_save_dir, i, j)
+                               choose_cams, 
+                               scene_save_dir, i, j)
 
 
 def save_all_scene_sequence_images(anno_file):
@@ -378,6 +379,8 @@ def main_v2(anno_file):
 
     scene_name_list, total_scene_seq = get_scene_sequence_data(data_infos)
 
+    scene_name_list = scene_name_list[250:]
+    total_scene_seq = total_scene_seq[250:]
     print(len(total_scene_seq), len(scene_name_list))
 
     choose_cams = [
@@ -389,11 +392,11 @@ def main_v2(anno_file):
     save_dir = "./data/nuscenes_scene_sequence"
     for idx, (scene_name, scene_seq) in tqdm(enumerate(zip(scene_name_list, total_scene_seq)),
                                              total=len(scene_name_list)):
-        if idx != 2:
-            continue
-        
         process_one_scene(scene_name, scene_seq, neighbor_length, save_dir, choose_cams)
 
+
+def process_one_scene_adapter(args):
+    return process_one_scene(*args)
 
 def main_multi_process(anno_file):
     with open(anno_file, "rb") as fp:
@@ -415,7 +418,6 @@ def main_multi_process(anno_file):
     save_dir = "./data/nuscenes_scene_sequence"
 
     ## start processing the data in multi-process
-    pool = Pool(processes=32)
     function_parameters = zip(
         scene_name_list,
         total_scene_seq,
@@ -424,16 +426,21 @@ def main_multi_process(anno_file):
         itertools.repeat(choose_cams)
     )
     
-    ## return the results in the order of input but return all results at one time finally
-    pool.starmap(process_one_scene, function_parameters)
+    # pool = Pool(processes=32)
+    # pool.starmap(process_one_scene, function_parameters)
+
+    jobs = 16
+    with multiprocessing.Pool(jobs) as pool:
+        args = [entry for entry in function_parameters]
+        results = list(tqdm(pool.imap(process_one_scene_adapter, args), total=len(args)))
 
 
 def main():
     pickle_path = "data/nuscenes/bevdetv3-lidarseg-nuscenes_infos_train.pkl"
     # save_all_scene_sequence_images(pickle_path)
-    # main_v2(pickle_path)
+    main_v2(pickle_path)
 
-    main_multi_process(pickle_path)
+    # main_multi_process(pickle_path)
 
 
 if __name__ == "__main__":

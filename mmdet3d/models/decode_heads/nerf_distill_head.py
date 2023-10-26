@@ -331,7 +331,7 @@ class NeRFOccPretrainHead(BaseModule):
             ## compare the temporal rendering semantic map
             semantic_pred = rearrange(
                 semantic_pred, 
-                '(b seq) num_cam c h w -> seq b num_cam c h w', seq=seq_len)
+                '(b seq) num_cam c h w -> seq b num_cam h w c', seq=seq_len)
 
             if self.semantic_align_type == 'kl':
                 loss_semantic_align = self.compute_semantic_kl_loss(
@@ -353,6 +353,30 @@ class NeRFOccPretrainHead(BaseModule):
                 loss_semantic_align = self.compute_semantic_contrastive_loss(
                     semantic_pred[0], semantic_pred[1],
                     instance_mask[0], instance_mask[1],
+                    loss_weight=self.loss_semantic_align_weight)
+            elif self.semantic_align_type == 'query_flow_background':
+                ## Here we adapt the background flow info to align the temporal
+                # instance masks
+                assert 'instance_masks' in kwargs
+                assert 'sample_pts_pad' in kwargs
+
+                instance_mask = kwargs['instance_masks']  # (b*seq, num_cam, h, w)
+                sample_pts = kwargs['sample_pts_pad']  # (b*seq, num_cam, N, 2)
+                if rand_view_idx is not None:
+                    instance_mask = instance_mask[:, rand_view_idx]
+                    sample_pts = sample_pts[:, rand_view_idx]
+                
+                instance_mask = rearrange(instance_mask,
+                                          '(b seq) num_cam h w -> seq b num_cam h w',
+                                          seq=seq_len)
+                sample_pts = rearrange(sample_pts,
+                                       '(b seq) num_cam N uv -> seq b num_cam N uv',
+                                       seq=seq_len)
+                
+                loss_semantic_align = self.compute_pointwise_loss_with_flow(
+                    semantic_pred[0], semantic_pred[1],
+                    instance_mask[0], instance_mask[1],
+                    sample_pts[0], sample_pts[1],
                     loss_weight=self.loss_semantic_align_weight)
             else:
                 raise NotImplementedError()
@@ -381,6 +405,98 @@ class NeRFOccPretrainHead(BaseModule):
                                           instance_mask_1,
                                           instance_mask_2,
                                           loss_weight=1.0):
+        """_summary_
+
+        Args:
+            render_semantic_1 (_type_): (b, num_cam, c, h, w)
+            render_semantic_2 (_type_): (b, num_cam, c, h, w)
+            instance_mask_1 (_type_): (b, num_cam, h, w)
+            instance_mask_2 (_type_): (b, num_cam, h, w)
+            loss_weight (float, optional): _description_. Defaults to 1.0.
+
+        Returns:
+            _type_: _description_
+        """
+        bs, num_cam, h, w = instance_mask_1.shape
+
+        render_semantic_1 = rearrange(render_semantic_1, 'b n c h w -> b n (h w) c')
+        render_semantic_2 = rearrange(render_semantic_2, 'b n c h w -> b n (h w) c')
+        instance_mask_1 = rearrange(instance_mask_1, 'b n h w -> b n (h w)')
+        instance_mask_2 = rearrange(instance_mask_2, 'b n h w -> b n (h w)')
+
+        instance_mask_1 = torch.sort(instance_mask_1, dim=-1)[0]
+        instance_mask_2 = torch.sort(instance_mask_2, dim=-1)[0]
+
+        ## scatter the features according to the instance mask
+        grouped_semantic_1 = scatter_mean(render_semantic_1,
+                                          instance_mask_1,
+                                          dim=2)
+        grouped_semantic_2 = scatter_mean(render_semantic_2,
+                                          instance_mask_2,
+                                          dim=2)
+        loss_semantic_temporal_align = 0.0
+        for i in range(bs):
+            for j in range(num_cam):
+                curr_instance_map_1 = instance_mask_1[i, j].reshape(h, w)
+                # NOTE: here we only select the pixels from the first frame
+                selected_points = self.sample_correspondence_points(curr_instance_map_1)
+
+                curr_instance_map_2 = instance_mask_2[i, j].reshape(h, w)
+
+                # fetch the corresponding instance mask ids
+                instance_id_list_1 = curr_instance_map_1[selected_points[:, 0], selected_points[:, 1]]
+                instance_id_list_2 = curr_instance_map_2[selected_points[:, 0], selected_points[:, 1]]
+
+                # obtain the grouped semantic features according to the instance ids
+                curr_grouped_feats_1 = grouped_semantic_1[i, j, instance_id_list_1]
+                curr_grouped_feats_2 = grouped_semantic_2[i, j, instance_id_list_2]
+                loss_semantic_align = cross_modality_contrastive_loss(
+                    curr_grouped_feats_1, curr_grouped_feats_2)
+                loss_semantic_temporal_align += loss_semantic_align
+        
+        return loss_semantic_temporal_align * loss_weight
+    
+    def compute_pointwise_loss_with_flow(self,
+                                         render_semantic1,
+                                         render_semantic2,
+                                         instance_mask1=None,
+                                         instance_mask2=None,
+                                         sample_pts1=None,
+                                         sample_pts2=None,
+                                         loss_weight=1.0):
+        bs, num_cam, h, w, c = render_semantic1.shape
+
+        all_points_feats1 = []
+        all_points_feats2 = []
+        for i in range(bs):
+            for j in range(num_cam):
+                num_valid_pts = sample_pts1[i, j, -1, 0]
+
+                curr_sample_pts1 = sample_pts1[i, j, :num_valid_pts]
+                curr_sample_pts2 = sample_pts2[i, j, :num_valid_pts]
+
+                curr_render_semantic1 = render_semantic1[i, j][curr_sample_pts1[:, 1], curr_sample_pts1[:, 0]]
+                curr_render_semantic2 = render_semantic2[i, j][curr_sample_pts2[:, 1], curr_sample_pts2[:, 0]]
+                all_points_feats1.append(curr_render_semantic1)
+                all_points_feats2.append(curr_render_semantic2)
+        
+        all_points_feats1 = torch.cat(all_points_feats1, dim=0)
+        all_points_feats2 = torch.cat(all_points_feats2, dim=0)
+
+        ## compute the loss
+        loss_semantic_align_pointwise = F.mse_loss(
+            all_points_feats1, all_points_feats2)
+
+        return loss_semantic_align_pointwise * loss_weight
+
+    def compute_semantic_contrastive_loss_with_flow(self,
+                                                    render_semantic_1,
+                                                    render_semantic_2,
+                                                    instance_mask_1,
+                                                    instance_mask_2,
+                                                    sample_pts_1,
+                                                    sample_pts_2,
+                                                    loss_weight=1.0):
         """_summary_
 
         Args:
