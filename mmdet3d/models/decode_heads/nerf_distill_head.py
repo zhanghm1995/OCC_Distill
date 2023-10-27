@@ -430,9 +430,6 @@ class NeRFOccPretrainHead(BaseModule):
         instance_mask_1 = rearrange(instance_mask_1, 'b n h w -> b n (h w)')
         instance_mask_2 = rearrange(instance_mask_2, 'b n h w -> b n (h w)')
 
-        instance_mask_1 = torch.sort(instance_mask_1, dim=-1)[0]
-        instance_mask_2 = torch.sort(instance_mask_2, dim=-1)[0]
-
         ## scatter the features according to the instance mask
         grouped_semantic_1 = scatter_mean(render_semantic_1,
                                           instance_mask_1,
@@ -538,12 +535,8 @@ class NeRFOccPretrainHead(BaseModule):
         instance_mask_1 = rearrange(instance_mask_1, 'b n h w -> b n (h w)')
         instance_mask_2 = rearrange(instance_mask_2, 'b n h w -> b n (h w)')
 
-        instance_mask_1, instance_mask1_sort_indices = \
-            torch.sort(instance_mask_1, dim=-1)
-        instance_mask_2, instance_mask2_sort_indices = \
-            torch.sort(instance_mask_2, dim=-1)
-
         ## scatter the features according to the instance mask
+        ## NOTE: the results of scatter_mean will be sorted according to the instance ids
         grouped_semantic_1 = scatter_mean(render_semantic_1,
                                           instance_mask_1,
                                           dim=2)
