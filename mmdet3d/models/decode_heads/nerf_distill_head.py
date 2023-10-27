@@ -378,6 +378,12 @@ class NeRFOccPretrainHead(BaseModule):
                     instance_mask[0], instance_mask[1],
                     sample_pts[0], sample_pts[1],
                     loss_weight=self.loss_semantic_align_weight)
+                
+                loss_semantic_align_contrastive = self.compute_semantic_contrastive_loss_with_flow(
+                    semantic_pred[0], semantic_pred[1],
+                    instance_mask[0], instance_mask[1],
+                    sample_pts[0], sample_pts[1],
+                    loss_weight=self.loss_semantic_align_weight)
             else:
                 raise NotImplementedError()
             
@@ -464,6 +470,22 @@ class NeRFOccPretrainHead(BaseModule):
                                          sample_pts1=None,
                                          sample_pts2=None,
                                          loss_weight=1.0):
+        """Compute the rendered semantics pointwise loss with the corresponding
+        sample points coordinates.
+
+        Args:
+            render_semantic1 (Tensor): (b, num_cam, h, w, c)
+            render_semantic2 (Tensor): same as above
+            instance_mask1 (Tensor, optional): (b, num_cam, h, w). Defaults to None.
+            instance_mask2 (Tensor, optional): same as above. Defaults to None.
+            sample_pts1 (Tensor, optional): (b, num_cam, N, 2). N is the number of
+                sampled points, 2 is the coordinates in (u, v) format. Defaults to None.
+            sample_pts2 (_type_, optional): _description_. Defaults to None.
+            loss_weight (float, optional): _description_. Defaults to 1.0.
+
+        Returns:
+            _type_: _description_
+        """
         bs, num_cam, h, w, c = render_semantic1.shape
 
         all_points_feats1 = []
@@ -500,7 +522,7 @@ class NeRFOccPretrainHead(BaseModule):
         """_summary_
 
         Args:
-            render_semantic_1 (_type_): (b, num_cam, c, h, w)
+            render_semantic_1 (_type_): (b, num_cam, h, w, c)
             render_semantic_2 (_type_): (b, num_cam, c, h, w)
             instance_mask_1 (_type_): (b, num_cam, h, w)
             instance_mask_2 (_type_): (b, num_cam, h, w)
@@ -511,13 +533,15 @@ class NeRFOccPretrainHead(BaseModule):
         """
         bs, num_cam, h, w = instance_mask_1.shape
 
-        render_semantic_1 = rearrange(render_semantic_1, 'b n c h w -> b n (h w) c')
-        render_semantic_2 = rearrange(render_semantic_2, 'b n c h w -> b n (h w) c')
+        render_semantic_1 = rearrange(render_semantic_1, 'b n h w c-> b n (h w) c')
+        render_semantic_2 = rearrange(render_semantic_2, 'b n h w c -> b n (h w) c')
         instance_mask_1 = rearrange(instance_mask_1, 'b n h w -> b n (h w)')
         instance_mask_2 = rearrange(instance_mask_2, 'b n h w -> b n (h w)')
 
-        instance_mask_1 = torch.sort(instance_mask_1, dim=-1)[0]
-        instance_mask_2 = torch.sort(instance_mask_2, dim=-1)[0]
+        instance_mask_1, instance_mask1_sort_indices = \
+            torch.sort(instance_mask_1, dim=-1)
+        instance_mask_2, instance_mask2_sort_indices = \
+            torch.sort(instance_mask_2, dim=-1)
 
         ## scatter the features according to the instance mask
         grouped_semantic_1 = scatter_mean(render_semantic_1,
@@ -531,13 +555,17 @@ class NeRFOccPretrainHead(BaseModule):
             for j in range(num_cam):
                 curr_instance_map_1 = instance_mask_1[i, j].reshape(h, w)
                 # NOTE: here we only select the pixels from the first frame
-                selected_points = self.sample_correspondence_points(curr_instance_map_1)
+                selected_points_indices = self.sample_points(
+                    curr_instance_map_1, sample_pts_1[i, j])
 
                 curr_instance_map_2 = instance_mask_2[i, j].reshape(h, w)
 
+                selected_points1 = sample_pts_1[i, j][selected_points_indices]
+                selected_points2 = sample_pts_2[i, j][selected_points_indices]
+
                 # fetch the corresponding instance mask ids
-                instance_id_list_1 = curr_instance_map_1[selected_points[:, 0], selected_points[:, 1]]
-                instance_id_list_2 = curr_instance_map_2[selected_points[:, 0], selected_points[:, 1]]
+                instance_id_list_1 = curr_instance_map_1[selected_points1[:, 1], selected_points1[:, 0]]
+                instance_id_list_2 = curr_instance_map_2[selected_points2[:, 1], selected_points2[:, 0]]
 
                 # obtain the grouped semantic features according to the instance ids
                 curr_grouped_feats_1 = grouped_semantic_1[i, j, instance_id_list_1]
@@ -589,36 +617,25 @@ class NeRFOccPretrainHead(BaseModule):
         all_selected_pixels = torch.stack(all_selected_pixels, dim=0)
         return all_selected_pixels
 
+    def sample_points(self, instance_mask, sample_pts):
+        num_selected_pixels = 1  # the number of selected pixels for each instance
 
-# @HEADS.register_module()
-# class NeRFDecoderHead(nn.Module):
-
-#     def __init__(self):
-#         pass
-    
-
-#     def loss(self,
-#              student_feats,
-#              teacher_feats,
-#              instance_mask=None):
+        num_valid_pts = sample_pts[-1, 0]
+        sample_pts = sample_pts[:num_valid_pts]
         
-#         losses = dict()
-        
-#         if self.use_semantic_align:
-#             render_semantic_stu = student_feats['render_semantic']
-#             render_semantic_tea = teacher_feats['render_semantic']
+        # obtain the valid points
+        sampled_instance_mask = instance_mask[sample_pts[:, 1], sample_pts[:, 0]]  # (N,)
+        unique_sampled_inst_ids = torch.unique(sampled_instance_mask)
+        sampled_mask = (sampled_instance_mask.unsqueeze(-1) == unique_sampled_inst_ids)
 
-#             ## scatter the features according to the instance mask
-#             grouped_semantic_stu = scatter_mean(render_semantic_stu,
-#                                                 instance_mask,
-#                                                 dim=1)
-#             grouped_semantic_tea = scatter_mean(render_semantic_tea,
-#                                                 instance_mask,
-#                                                 dim=1)
-#             loss_semantic_align = cross_modality_contrastive_loss(
-#                 grouped_semantic_stu, grouped_semantic_tea)
-#             losses['loss_semantic_align']
+        all_selected_pixels = []
+        for i in range(len(unique_sampled_inst_ids)):
+            valid_indices = torch.nonzero(sampled_mask[..., i])
+            # randomly select the points
+            selected_indices = torch.randperm(valid_indices.size(0))[:num_selected_pixels]
+            selected_indices_raw = valid_indices[selected_indices].squeeze()
+            all_selected_pixels.extend(selected_indices_raw)
         
-#         return losses
-
+        all_selected_pixels = torch.stack(all_selected_pixels, dim=0)
+        return all_selected_pixels
 

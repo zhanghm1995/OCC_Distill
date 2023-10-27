@@ -540,8 +540,8 @@ def main_all_objects(anno_file):
     data_infos = list(sorted(data_infos, key=lambda e: e['timestamp']))
 
     scene_name_list, total_scene_seq = get_scene_sequence_data(data_infos)
-    scene_name_list = scene_name_list[35:]
-    total_scene_seq = total_scene_seq[35:]
+    scene_name_list = scene_name_list[35:80]
+    total_scene_seq = total_scene_seq[35:80]
     print(len(total_scene_seq), len(scene_name_list))
 
     choose_cams = [
@@ -553,8 +553,6 @@ def main_all_objects(anno_file):
     save_dir = "./data/nuscenes_scene_sequence_v1"
     for idx, (scene_name, scene_seq) in tqdm(enumerate(zip(scene_name_list, total_scene_seq)),
                                              total=len(scene_name_list)):
-        if idx < 40:
-            continue
         process_one_scene(process_two_frames_all_objects, 
                           scene_name, 
                           scene_seq, 
