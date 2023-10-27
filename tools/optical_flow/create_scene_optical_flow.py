@@ -20,6 +20,8 @@ import multiprocessing
 import multiprocessing as mp
 from multiprocessing import Pool
 import itertools
+from mmcv.ops.points_in_boxes import points_in_boxes_cpu
+from scipy.spatial.transform import Rotation
 
 
 def get_scene_sequence_data(data_infos):
@@ -102,7 +104,7 @@ def get_lidar2img_all_cams(results, cam_names=None):
 
 
 def project_points_to_image(points_lidar, lidar2img, height, width, 
-                            depth_range=[1.0, 100.0]):
+                            depth_range=[1.0, 50.0]):
     points_img = points_lidar[:, :3].matmul(
                 lidar2img[:3, :3].T) + lidar2img[:3, 3].unsqueeze(0)
     points_img = torch.cat(
@@ -247,7 +249,136 @@ def process_two_frames(frame1, frame2,
         pickle.dump(results, f)
 
 
-def process_one_scene(scene_name, scene_seq, neighbor_length=3,
+def process_two_frames_all_objects(frame1, frame2, 
+                                   choose_cams, 
+                                   scene_save_dir, i, j):
+    sample_token1 = frame1['token']
+    sample_token2 = frame2['token']
+
+    # load the point cloud in frame1
+    lidar_path = frame1['lidar_path']
+    points1 = np.fromfile(lidar_path, dtype=np.float32).reshape(-1, 5)[:, :3]
+    points1 = torch.from_numpy(points1)
+
+    ############################### cut out movable object points and masks in frame1
+    gt_bbox_token1 = frame1['instance_tokens']
+    gt_bbox_3d1 = frame1['gt_boxes']
+    gt_bbox_3d1[:, 2] -= gt_bbox_3d1[:, 5] / 2.
+    gt_bbox_3d1[:, 2] = gt_bbox_3d1[:, 2] - 0.1  # Move the bbox slightly down in the z direction
+    gt_bbox_3d1[:, 3:6] = gt_bbox_3d1[:, 3:6] * 1.1  # Slightly expand the bbox to wrap all object points
+
+    points_in_boxes1 = points_in_boxes_cpu(points1.unsqueeze(0),
+                                            torch.from_numpy(gt_bbox_3d1[np.newaxis, :]))
+    object_points_list1 = []
+    j0 = 0
+    while j0 < points_in_boxes1.shape[-1]:
+        object_points_mask = points_in_boxes1[0][:, j0].bool()
+        object_points = points1[object_points_mask]
+        object_points_list1.append(object_points)
+        j0 = j0 + 1
+
+    moving_mask1 = torch.ones_like(points_in_boxes1)
+    points_in_boxes1 = torch.sum(points_in_boxes1 * moving_mask1, dim=-1).bool()
+    points_mask1 = ~(points_in_boxes1[0])
+
+    oneself_mask1 = ((torch.abs(points1[:, 0]) > 3) |
+                    (torch.abs(points1[:, 1]) > 3) |
+                    (torch.abs(points1[:, 2]) > 3))
+    points_mask1 = points_mask1 & oneself_mask1
+    # _write_obj(points1, 'points1.obj')
+    points1 = points1[points_mask1]
+    ##############################
+
+    # transform the point cloud in lidar coordinate to global coordinate
+    lidar2global_rts1 = get_lidar2global(frame1)
+    points1_global = points1.matmul(lidar2global_rts1[:3, :3].T) + \
+        lidar2global_rts1[:3, 3].unsqueeze(0)
+
+    # get the global2lidar transformation matrix in frame2
+    lidar2global_rts2 = get_lidar2global(frame2)
+    global2lidar_rts2 = torch.inverse(lidar2global_rts2)
+
+    # transform the point cloud in global coordinate to lidar coordinate in frame2
+    points1_in_frame2 = points1_global.matmul(global2lidar_rts2[:3, :3].T) + \
+        global2lidar_rts2[:3, 3].unsqueeze(0)
+    
+    ##############################
+    # place object in frame2
+    gt_bbox_token2 = frame2['instance_tokens']
+    gt_bbox_3d2 = frame2['gt_boxes']
+    gt_bbox_3d2[:, 2] -= gt_bbox_3d2[:, 5] / 2.
+    gt_bbox_3d2[:, 2] = gt_bbox_3d2[:, 2] - 0.1  # Move the bbox slightly down in the z direction
+    gt_bbox_3d2[:, 3:6] = gt_bbox_3d2[:, 3:6] * 1.1  # Slightly expand the bbox to wrap all object points
+    rots = gt_bbox_3d2[:, 6:7]
+    locs = gt_bbox_3d2[:, 0:3]
+
+    # bbox placement
+    point1_obj_list = []
+    point2_obj_list = []
+    for k, object_token in enumerate(gt_bbox_token1):
+        for q, object_token2 in enumerate(gt_bbox_token2):
+            if object_token == object_token2:
+                points = object_points_list1[k]
+                point1_obj_list.append(points)
+
+                # rotate to unified box
+                points = points - gt_bbox_3d1[k][:3]
+                rots1 = gt_bbox_3d1[k][6]
+                Rot = Rotation.from_euler('z', -rots1, degrees=False)
+                points = Rot.apply(points)
+
+                # move to frame2 box
+                Rot = Rotation.from_euler('z', rots[q], degrees=False)
+                rotated_object_points = Rot.apply(points)
+                points = rotated_object_points + locs[q]
+                point2_obj_list.append(torch.from_numpy(points))
+    ##############################
+    
+    if len(point1_obj_list) != 0:
+        points1 = torch.cat([points1, torch.cat(point1_obj_list)])
+        points1_in_frame2 = torch.cat([points1_in_frame2, torch.cat(point2_obj_list)])
+        points1_in_frame2 = points1_in_frame2.float()
+    
+    assert len(points1) == len(points1_in_frame2), (len(points1), len(points1_in_frame2))
+
+    ## project the points to the image plane and find the correspondence points
+    lidar2img1 = get_lidar2img_all_cams(frame1, choose_cams)
+    lidar2img2 = get_lidar2img_all_cams(frame2, choose_cams)
+
+    results_coord1 = []
+    results_coord2 = []
+    for idx, cam in enumerate(choose_cams):
+        cam_img_size = [900, 1600]  # (h, w)
+        coord1, coord2 = find_correspondence_points(
+            points1, lidar2img1[idx], 
+            points1_in_frame2, lidar2img2[idx], 
+            cam_img_size)
+        results_coord1.append(coord1.numpy())
+        results_coord2.append(coord2.numpy())
+
+        VISUALIZE = False
+        if VISUALIZE:
+            ## visualize the projected points
+            img_path = frame1['cams'][cam]['data_path']
+            img = cv2.imread(img_path)
+            img = draw_points(img, results_coord1[-1])
+            save_path = osp.join(scene_save_dir, f"{i}_{j}_{cam}_{i}.png")
+            cv2.imwrite(save_path, img)
+            
+            img_path = frame2['cams'][cam]['data_path']
+            img = cv2.imread(img_path)
+            img = draw_points(img, results_coord2[-1])
+            save_path = osp.join(scene_save_dir, f"{i}_{j}_{cam}_{j}.png")
+            cv2.imwrite(save_path, img)
+
+    results = {'coord1': results_coord1, 'coord2': results_coord2}
+
+    save_path = osp.join(scene_save_dir, f"{sample_token1}_{sample_token2}.pkl")
+    with open(save_path, 'wb') as f:
+        pickle.dump(results, f)
+
+
+def process_one_scene(func, scene_name, scene_seq, neighbor_length=3,
                       save_dir=None, choose_cams=None):
     num_frames = len(scene_seq)
     scene_save_dir = osp.join(save_dir, scene_name)
@@ -259,17 +390,17 @@ def process_one_scene(scene_name, scene_seq, neighbor_length=3,
         for j in range(i + 1, min(i + 1 + neighbor_length, num_frames)):
             frame1 = scene_seq[i]
             frame2 = scene_seq[j]
-            process_two_frames(frame1, frame2, 
-                               choose_cams, 
-                               scene_save_dir, i, j)
+            func(frame1, frame2, 
+                 choose_cams, 
+                 scene_save_dir, i, j)
 
     for i in range(num_frames - 1, 0, -1):
         for j in range(i - 1, max(i - 1 - neighbor_length, -1), -1):
             frame1 = scene_seq[i]
             frame2 = scene_seq[j]
-            process_two_frames(frame1, frame2, 
-                               choose_cams, 
-                               scene_save_dir, i, j)
+            func(frame1, frame2, 
+                 choose_cams, 
+                 scene_save_dir, i, j)
 
 
 def save_all_scene_sequence_images(anno_file):
@@ -392,7 +523,44 @@ def main_v2(anno_file):
     save_dir = "./data/nuscenes_scene_sequence"
     for idx, (scene_name, scene_seq) in tqdm(enumerate(zip(scene_name_list, total_scene_seq)),
                                              total=len(scene_name_list)):
-        process_one_scene(scene_name, scene_seq, neighbor_length, save_dir, choose_cams)
+        process_one_scene(process_two_frames, 
+                          scene_name, 
+                          scene_seq, 
+                          neighbor_length, 
+                          save_dir, 
+                          choose_cams)
+
+
+def main_all_objects(anno_file):
+
+    with open(anno_file, "rb") as fp:
+        dataset = pickle.load(fp)
+    
+    data_infos = dataset['infos']
+    data_infos = list(sorted(data_infos, key=lambda e: e['timestamp']))
+
+    scene_name_list, total_scene_seq = get_scene_sequence_data(data_infos)
+    scene_name_list = scene_name_list[35:]
+    total_scene_seq = total_scene_seq[35:]
+    print(len(total_scene_seq), len(scene_name_list))
+
+    choose_cams = [
+        'CAM_FRONT_LEFT', 'CAM_FRONT', 'CAM_FRONT_RIGHT', 'CAM_BACK_LEFT',
+        'CAM_BACK', 'CAM_BACK_RIGHT'
+    ]
+
+    neighbor_length = 3
+    save_dir = "./data/nuscenes_scene_sequence_v1"
+    for idx, (scene_name, scene_seq) in tqdm(enumerate(zip(scene_name_list, total_scene_seq)),
+                                             total=len(scene_name_list)):
+        if idx < 40:
+            continue
+        process_one_scene(process_two_frames_all_objects, 
+                          scene_name, 
+                          scene_seq, 
+                          neighbor_length, 
+                          save_dir, 
+                          choose_cams)
 
 
 def process_one_scene_adapter(args):
@@ -436,9 +604,11 @@ def main_multi_process(anno_file):
 
 
 def main():
-    pickle_path = "data/nuscenes/bevdetv3-lidarseg-nuscenes_infos_train.pkl"
+    pickle_path = "data/nuscenes/bevdetv3-inst-nuscenes_infos_train.pkl"
     # save_all_scene_sequence_images(pickle_path)
-    main_v2(pickle_path)
+    # main_v2(pickle_path)
+
+    main_all_objects(pickle_path)
 
     # main_multi_process(pickle_path)
 
