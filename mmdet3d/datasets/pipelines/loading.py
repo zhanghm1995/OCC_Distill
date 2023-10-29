@@ -1568,9 +1568,10 @@ class PrepareImageInputsForNeRF(object):
         ])
 
     def img_transform(self, img, post_rot, post_tran, resize, resize_dims,
-                      crop, flip, rotate):
+                      crop, flip, rotate, resample=None):
         # adjust image
-        img = self.img_transform_core(img, resize_dims, crop, flip, rotate)
+        img = self.img_transform_core(
+            img, resize_dims, crop, flip, rotate, resample=resample)
 
         # post-homography transformation
         post_rot *= resize
@@ -1588,9 +1589,13 @@ class PrepareImageInputsForNeRF(object):
 
         return img, post_rot, post_tran
 
-    def img_transform_core(self, img, resize_dims, crop, flip, rotate):
+    def img_transform_core(self, 
+                           img: Image, 
+                           resize_dims, 
+                           crop, flip, rotate,
+                           resample=None):
         # adjust image
-        img = img.resize(resize_dims)
+        img = img.resize(resize_dims, resample)
         if crop is not None:
             img = img.crop(crop)
         if flip:
@@ -1805,14 +1810,14 @@ class LoadInstanceMaskFromFile(PrepareImageInputsForNeRF):
 
     def __init__(self, 
                  data_config,
-                 mode='png', 
-                 instance_seg_name='superpixels_sam',
-                 sequential=False):
-        self.data_config = data_config
+                 is_train=False,
+                 sequential=False,
+                 instance_mask_dir=None,
+                 mode='png'):
+        super().__init__(data_config, is_train, sequential)
         self.render_size = data_config['render_size']
-        self.sequential = sequential
         self.mode = mode
-        self.instance_seg_name = instance_seg_name
+        self.instance_mask_dir = instance_mask_dir
 
     def __call__(self, results):
         if self.mode == 'json':
@@ -1841,27 +1846,18 @@ class LoadInstanceMaskFromFile(PrepareImageInputsForNeRF):
             for cam_name in results['cam_names']:
                 cam_data = results['curr']['cams'][cam_name]
                 cam_token = cam_data['sample_data_token']
-                instance_mask_path = osp.join(
-                    f"./data/nuscenes/{self.instance_seg_name}", 
-                    f"{cam_token}.png")
+                instance_mask_path = osp.join(self.instance_mask_dir, 
+                                              f"{cam_token}.png")
 
                 instance_img = Image.open(instance_mask_path)
 
-                # resize the instance mask to the same size as the image
-                img_non_aug = self.sample_noaugmentation(
-                    H=instance_img.height, W=instance_img.width)
-                
-                post_rot = torch.eye(2)
-                post_tran = torch.zeros(2)
-                instance_img, post_rot2_wo_aug, post_tran2_wo_aug = \
-                    self.img_transform(instance_img, 
-                                       post_rot,
-                                       post_tran,
-                                       resize=img_non_aug[0],
-                                       resize_dims=img_non_aug[1],
-                                       crop=img_non_aug[2],
-                                       flip=img_non_aug[3],
-                                       rotate=img_non_aug[4])
+                # resize the instance mask to the same size as the image,
+                # NOTE: here we donot apply any augmentations to the instance mask
+                instance_img = self.img_transform_core(
+                    instance_img, 
+                    self.data_config.render_size[::-1], 
+                    None, False, None,
+                    resample=Image.Resampling.NEAREST)
                 instance_img = torch.from_numpy(np.array(instance_img))
                 instance_imgs.append(instance_img)
 
@@ -1869,14 +1865,15 @@ class LoadInstanceMaskFromFile(PrepareImageInputsForNeRF):
                     assert 'adjacent' in results
                     for adj_info in results['adjacent']:
                         cam_token = adj_info['cams'][cam_name]['sample_data_token']
-                        instance_mask_path = osp.join(
-                            f"./data/nuscenes/{self.instance_seg_name}", 
-                            f"{cam_token}.png")
+                        instance_mask_path = osp.join(self.instance_mask_dir, 
+                                                      f"{cam_token}.png")
                 
                         instance_img_adjacent = Image.open(instance_mask_path)
                         instance_img_adjacent = self.img_transform_core(
-                            instance_img_adjacent, self.data_config.render_size[::-1],
-                            None, False, None)
+                            instance_img_adjacent, 
+                            self.data_config.render_size[::-1],
+                            None, False, None,
+                            resample=Image.Resampling.NEAREST)
                         
                         instance_img_adjacent = torch.from_numpy(np.array(instance_img_adjacent))
                         instance_imgs.append(instance_img_adjacent)
@@ -1886,6 +1883,7 @@ class LoadInstanceMaskFromFile(PrepareImageInputsForNeRF):
         
         instance_imgs = torch.stack(instance_imgs)
         results['instance_masks'] = instance_imgs.to(torch.long)
+        return results
             
 
 @PIPELINES.register_module()

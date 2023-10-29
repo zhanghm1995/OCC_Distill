@@ -1,11 +1,11 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 from .base import Base3DDetector
 from .bevdet import BEVDepth4D, BEVDet, BEVDet4D, BEVDetTRT, BEVStereo4D
-from .bevdet_occ import BEVStereo4DOCC, BEVFusionStereo4DOCC, BEVFusionOCCLidarSupervise
+from .bevdet_occ import BEVStereo4DOCC, BEVFusionStereo4DOCC, BEVFusionOCCLidarSupervise, BEVFusionOCCLidarSegSupervise
 from .bevdet_occ_nerf_S import MyBEVStereo4DOCCNeRF, BEVStereo4DSSCOCCNeRF
 from .bevdet_occ_nerf_S_v1 import MyBEVStereo4DOCCNeRFV1
 from .bevdet_occ_nerf_S_visualizer import MyBEVStereo4DOCCNeRFVisualizer
-from .bevdet_occ_pretrain import BEVStereo4DOCCPretrain
+from .bevdet_occ_pretrain import BEVStereo4DOCCPretrain, BEVStereo4DOCCTemporalNeRFPretrain, BEVStereo4DOCCTemporalNeRFPretrainV2
 from .bevdet_occ_ssc import BEVFusionStereo4DSSCOCC
 from .bevdet_fusion_occ import BEVFusionStereo4DOCCNeRF
 from .bevdet_lidar_occ import BEVLidarOCC, LidarOCC
@@ -40,10 +40,12 @@ __all__ = [
     'MinkSingleStage3DDetector', 'SASSD', 'BEVDet', 'BEVDet4D', 'BEVDepth4D',
     'BEVDetTRT', 'BEVStereo4D', 'BEVStereo4DOCC', 'BEVFusionStereo4DOCC',
     'BEVLidarOCC', 'LidarOCC', 'BEVLidarDistillCameraOCC',
-    'BEVFusionStereo4DSSCOCC', 'BEVStereo4DOCCPretrain', 'MyBEVStereo4DOCCNeRF',
+    'BEVFusionStereo4DSSCOCC', 'BEVStereo4DOCCPretrain', 
+    'BEVStereo4DOCCTemporalNeRFPretrain', 'BEVStereo4DOCCTemporalNeRFPretrainV2',
+    'MyBEVStereo4DOCCNeRF',
     'MyBEVStereo4DOCCNeRFV1', 'MyBEVLidarOCCNeRF',
     'MyBEVLidarDistillCameraOCCNeRF', 'BEVStereo4DOCCSegmentor',
     'BEVStereo4DSSCOCCNeRF', 'BEVFusionStereo4DOCCNeRF',
     'BEVStereo4DOCCSegmentorDense', 'MyBEVStereo4DOCCNeRFVisualizer',
-    'BEVFusionOCCLidarSupervise'
+    'BEVFusionOCCLidarSupervise', 'BEVFusionOCCLidarSegSupervise'
 ]

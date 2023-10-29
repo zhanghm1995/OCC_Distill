@@ -6,6 +6,8 @@ __pycache__/
 
 ckpts/
 
+results/
+
 # C extensions
 *.so
 
@@ -117,6 +119,8 @@ data
 *.pkl.json
 *.log.json
 work_dirs/
+work_dirs
+
 exps/
 *~
 mmdet3d/.mim
