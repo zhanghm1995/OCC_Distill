@@ -178,7 +178,7 @@ class OccVisiblityHead(OccSimpleHead):
     def get_occ(self, inputs, img_metas, **kwargs):
         occ_out = self.forward(inputs)  # (b, 200, 200, 16, 2)
         occ_score = occ_out.sigmoid()
-        occ_score = (occ_score > 0.5).float()
+        occ_score = (occ_score > 0.25).float()
         occ_score_np = occ_score.squeeze().cpu().numpy().astype(np.uint8)
 
         # occ_score = occ_out.softmax(-1)
@@ -187,7 +187,7 @@ class OccVisiblityHead(OccSimpleHead):
         # occ_score_np[occ_score_np>0.5] = 1
         # occ_score_np[occ_score_np<=0.5] = 0
         token = img_metas[0]['sample_idx']
-        save_dir = 'data/nuscenes/mask_lidar_pred_bce'
+        save_dir = 'data/nuscenes/mask_lidar_pred_bce_0.25'
         os.makedirs(save_dir, exist_ok=True)
 
         save_path = os.path.join(save_dir, token + '.npz')
