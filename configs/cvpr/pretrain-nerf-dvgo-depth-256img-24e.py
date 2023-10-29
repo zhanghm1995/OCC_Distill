@@ -2,14 +2,6 @@
 Copyright (c) 2023 by Haiming Zhang. All Rights Reserved.
 
 Author: Haiming Zhang
-Date: 2023-10-29 10:00:38
-Email: haimingzhang@link.cuhk.edu.cn
-Description: 
-'''
-'''
-Copyright (c) 2023 by Haiming Zhang. All Rights Reserved.
-
-Author: Haiming Zhang
 Date: 2023-10-27 15:02:30
 Email: haimingzhang@link.cuhk.edu.cn
 Description: Pretrain the BEVDet with rendered depth loss.
@@ -55,7 +47,7 @@ voxel_size = [16, 200, 200]
 
 numC_Trans = 32
 
-multi_adj_frame_id_cfg = (1, 2 + 1, 1)
+multi_adj_frame_id_cfg = (1, 1 + 1, 1)
 
 model = dict(
     type='BEVStereo4DOCCTemporalNeRFPretrainV2',
@@ -231,7 +223,7 @@ test_data_config = dict(
     ann_file=data_root + 'bevdetv3-inst-nuscenes_infos_val.pkl')
 
 data = dict(
-    samples_per_gpu=2,
+    samples_per_gpu=4,
     workers_per_gpu=6,
     train=dict(
         data_root=data_root,
