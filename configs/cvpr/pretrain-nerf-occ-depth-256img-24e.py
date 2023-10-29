@@ -2,10 +2,9 @@
 Copyright (c) 2023 by Haiming Zhang. All Rights Reserved.
 
 Author: Haiming Zhang
-Date: 2023-10-26 14:42:55
+Date: 2023-10-27 15:02:30
 Email: haimingzhang@link.cuhk.edu.cn
-Description: Using the instance masks to add the contrastive learning.
-Here we use the flow information to align the instance masks.
+Description: Pretrain the BEVDet with rendered depth loss.
 '''
 
 _base_ = ['../_base_/datasets/nus-3d.py', '../_base_/default_runtime.py']
@@ -25,8 +24,8 @@ data_config = {
     'input_size': (256, 704),
     # 'input_size': (224, 352), # SMALL FOR DEBUG
     'src_size': (900, 1600),
-    'render_size': (90, 160), # SMALL FOR DEBUG
-    # 'render_size': (256, 704),
+    # 'render_size': (90, 160), # SMALL FOR DEBUG
+    'render_size': (180, 320),
 
     # Augmentation
     'resize': (-0.06, 0.11),
@@ -48,13 +47,13 @@ voxel_size = [16, 200, 200]
 
 numC_Trans = 32
 
-multi_adj_frame_id_cfg = (1, 1 + 1, 1)
+multi_adj_frame_id_cfg = (1, 2 + 1, 1)
 
 model = dict(
-    type='BEVStereo4DOCCTemporalNeRFPretrain',
+    type='MyBEVStereo4DOCCNeRF',
     align_after_view_transfromation=False,
     num_adj=len(range(*multi_adj_frame_id_cfg)),
-    
+    scene_filter_index=10086, # all scenes
     img_backbone=dict(
         pretrained='torchvision://resnet50',
         type='ResNet',
@@ -76,16 +75,16 @@ model = dict(
     ## the nerf decoder head
     nerf_head=dict(
         type='NeRFDecoderHead',
-        num_random_view=-1,
-        mask_render=False,
-        img_recon_head=False,
+        mask_render=True,
+        img_recon_head=True,
         semantic_head=True,
         semantic_dim=17,
         real_size=grid_config['x'][:2] + grid_config['y'][:2] + grid_config['z'][:2],
         stepsize=grid_config['depth'][2],
         voxels_size=voxel_size,
         mode='bilinear',  # ['bilinear', 'nearest']
-        render_type='DVGO',  # ['DVGO', 'prob', 'density']
+        render_type='density',  # ['prob', 'density']
+        # render_size=data_config['input_size'],
         render_size=data_config['render_size'],
         depth_range=grid_config['depth'][:2],
         loss_nerf_weight=0.5,
@@ -125,17 +124,15 @@ model = dict(
         num_channels=[numC_Trans, ],
         stride=[1, ],
         backbone_output_ids=[0, ]),
-
-    loss_compare=dict(type='MSELoss', 
-                      loss_weight=1.0),
-    pretrain_head=dict(
-        type='NeRFOccPretrainHead',
-        semantic_align_type='query_flow_background', 
-    )
+    loss_occ=dict(
+        type='CrossEntropyLoss',
+        use_sigmoid=False,
+        loss_weight=1.0),
+    use_mask=True,
 )
 
 # Data
-dataset_type = 'NuScenesDatasetOccPretrain'
+dataset_type = 'NuScenesDatasetOccpancy'
 data_root = 'data/nuscenes/'
 file_client_args = dict(backend='disk')
 
@@ -165,30 +162,22 @@ train_pipeline = [
         load_dim=5,
         use_dim=5,
         file_client_args=file_client_args),
-    dict(type='PointToMultiViewDepthForNeRF', 
-         downsample=1, 
-         grid_config=grid_config, 
+    dict(type='PointToMultiViewDepthForNeRF', downsample=1, grid_config=grid_config, 
          render_size=data_config['render_size'],
          render_scale=[data_config['render_size'][0]/data_config['src_size'][0], 
                        data_config['render_size'][1]/data_config['src_size'][1]]),
-    dict(type='LoadInstanceMaskFromFile',
-         is_train=True,
-         data_config=data_config,
-         sequential=False,
-         instance_mask_dir='data/nuscenes/superpixels_sam'),
     dict(type='DefaultFormatBundle3D', class_names=class_names),
     dict(
         type='Collect3D', keys=['img_inputs', 'gt_depth', 
-                                'img_semantic', 'instance_masks',
+                                'voxel_semantics', 'mask_lidar', 
+                                'mask_camera', 'img_semantic',
                                 'intricics', 'pose_spatial', 
                                 'flip_dx', 'flip_dy', 
                                 'render_gt_img', 'render_gt_depth'])
 ]
 
 test_pipeline = [
-    dict(type='PrepareImageInputsForNeRF', 
-         data_config=data_config, 
-         sequential=True),
+    dict(type='PrepareImageInputsForNeRF', data_config=data_config, sequential=True),
     dict(
         type='LoadAnnotationsBEVDepth',
         bda_aug_conf=bda_aug_conf,
@@ -236,8 +225,8 @@ test_data_config = dict(
     ann_file=data_root + 'bevdetv3-lidarseg-nuscenes_infos_val.pkl')
 
 data = dict(
-    samples_per_gpu=1,
-    workers_per_gpu=8,
+    samples_per_gpu=3,
+    workers_per_gpu=2,
     train=dict(
         data_root=data_root,
         ann_file=data_root + 'bevdetv3-lidarseg-nuscenes_infos_train.pkl',
@@ -257,12 +246,18 @@ for key in ['val', 'train', 'test']:
 # Optimizer
 optimizer = dict(type='AdamW', lr=1e-4, weight_decay=1e-2)
 optimizer_config = dict(grad_clip=dict(max_norm=5, norm_type=2))
+# lr_config = dict(
+#     policy='CosineAnnealing',
+#     warmup='linear',
+#     warmup_iters=500,
+#     warmup_ratio=1.0 / 3,
+#     min_lr_ratio=1e-3)
 lr_config = dict(
-    policy='CosineAnnealing',
+    policy='step',
     warmup='linear',
-    warmup_iters=500,
-    warmup_ratio=1.0 / 3,
-    min_lr_ratio=1e-3)
+    warmup_iters=200,
+    warmup_ratio=0.001,
+    step=[100,])
 runner = dict(type='EpochBasedRunner', max_epochs=24)
 evaluation = dict(interval=24, pipeline=test_pipeline)
 
@@ -282,3 +277,5 @@ log_config = dict(
         dict(type='TextLoggerHook'),
         dict(type='TensorboardLoggerHook')
     ])
+
+# load_from = "bevdet-r50-4d-stereo-cbgs.pth"

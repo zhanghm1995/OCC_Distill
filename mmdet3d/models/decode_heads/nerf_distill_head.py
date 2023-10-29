@@ -50,6 +50,55 @@ def cross_modality_contrastive_loss(feat1,
     return loss
 
 
+def get_inter_channel_loss(feat1, feat2):
+    # get the inter instance loss
+    feat1 = feat1.permute(1, 0).matmul(feat1) # C, C
+    feat2 = feat2.permute(1, 0).matmul(feat2)
+
+    feat1 = F.normalize(feat1, dim=-1)
+    feat2 = F.normalize(feat2, dim=-1)
+    
+    loss_inter_channel = F.mse_loss(feat1, feat2, reduction='none')
+    loss_inter_channel = loss_inter_channel.sum(-1)
+    loss_inter_channel = loss_inter_channel.mean()
+    return loss_inter_channel
+
+
+def get_inter_instance_loss(feat1, feat2):
+    feat1 = feat1.matmul(feat1.permute(1, 0)) # N, N 
+    feat2 = feat2.matmul(feat2.permute(1, 0))
+    
+    feat1 = F.normalize(feat1, dim=-1)
+    feat2 = F.normalize(feat2, dim=-1)
+    
+    loss_inter_instance = F.mse_loss(feat1, feat2, reduction='none')
+    loss_inter_instance = loss_inter_instance.sum(-1)
+    loss_inter_instance = loss_inter_instance.mean()
+    return loss_inter_instance
+
+
+def calc_tig_feat_align_loss(feat1, feat2,
+                             use_inter_instance_loss=True,
+                             use_inter_channel_loss=True):
+    """Calculate the TiG-BEV feature alignment loss.
+
+    Args:
+        feat1 (Tensor): (N, C)
+        feat2 (Tensor): (N, C)
+    """
+    loss_dict = dict()
+    
+    if use_inter_instance_loss:
+        loss_inter_instance = get_inter_instance_loss(feat1, feat2)
+        loss_dict['loss_inter_instance'] = loss_inter_instance
+
+    if use_inter_channel_loss:
+        loss_inter_channel = get_inter_channel_loss(feat1, feat2)
+        loss_dict['loss_inter_channel'] = loss_inter_channel
+
+    return loss_dict 
+
+
 @HEADS.register_module()
 class NeRFOccDistillSimpleHead(BaseModule):
     """Simple version of the head to do the knowledge distillation
@@ -354,7 +403,7 @@ class NeRFOccPretrainHead(BaseModule):
                     semantic_pred[0], semantic_pred[1],
                     instance_mask[0], instance_mask[1],
                     loss_weight=self.loss_semantic_align_weight)
-            elif self.semantic_align_type == 'query_flow_background':
+            elif self.semantic_align_type == 'query_flow_all':
                 ## Here we adapt the background flow info to align the temporal
                 # instance masks
                 assert 'instance_masks' in kwargs
@@ -453,9 +502,9 @@ class NeRFOccPretrainHead(BaseModule):
                 # obtain the grouped semantic features according to the instance ids
                 curr_grouped_feats_1 = grouped_semantic_1[i, j, instance_id_list_1]
                 curr_grouped_feats_2 = grouped_semantic_2[i, j, instance_id_list_2]
-                loss_semantic_align = cross_modality_contrastive_loss(
-                    curr_grouped_feats_1, curr_grouped_feats_2)
-                loss_semantic_temporal_align += loss_semantic_align
+            loss_semantic_align = cross_modality_contrastive_loss(
+                curr_grouped_feats_1, curr_grouped_feats_2)
+            loss_semantic_temporal_align += loss_semantic_align
         
         return loss_semantic_temporal_align * loss_weight
     
@@ -561,7 +610,7 @@ class NeRFOccPretrainHead(BaseModule):
                 instance_id_list_2 = curr_instance_map_2[selected_points2[:, 1], selected_points2[:, 0]]
 
                 # obtain the grouped semantic features according to the instance ids
-                curr_grouped_feats_1 = grouped_semantic_1[i, j, instance_id_list_1]
+                curr_grouped_feats_1 = grouped_semantic_1[i, j, instance_id_list_1]  # (N, C)
                 curr_grouped_feats_2 = grouped_semantic_2[i, j, instance_id_list_2]
                 loss_semantic_align = cross_modality_contrastive_loss(
                     curr_grouped_feats_1, curr_grouped_feats_2)

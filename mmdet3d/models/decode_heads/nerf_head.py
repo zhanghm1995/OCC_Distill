@@ -15,8 +15,11 @@ import cv2
 import os
 import os.path as osp
 import time
+from torch_scatter import segment_coo
+
 from mmdet3d.models.builder import HEADS
 from mmdet3d.models.losses.lovasz_loss import lovasz_softmax
+from mmdet3d.models.nerf.utils import Raw2Alpha, Alphas2Weights
 
 
 def visualize_depth(depth, mask=None, depth_min=None, depth_max=None, direct=False):
@@ -138,9 +141,11 @@ class NeRFDecoderHead(nn.Module):
         self.render_type = render_type
         self.num_voxels = voxels_size[0] * voxels_size[1] * voxels_size[2]
         self.voxel_size = ((self.xyz_max - self.xyz_min).prod() / self.num_voxels).pow(1 / 3)
+        print('voxel_size', self.voxel_size)
 
         N_samples = int(np.linalg.norm(np.array([voxels_size[0] // 2, voxels_size[1] // 2, voxels_size[2] // 2]) + 1) / self.stepsize) + 1
         self.register_buffer('rng', torch.arange(N_samples)[None].float())
+        print('rng', self.rng)
 
     def grid_sampler(self, xyz, grid, align_corners=True, mode='bilinear'):
         '''Wrapper for the interp operation'''
@@ -248,7 +253,8 @@ class NeRFDecoderHead(nn.Module):
             else:
                 rays_o_i = rays_o[render_mask]
                 rays_d_i = rays_d[render_mask]
-            rays_pts, mask_outbbox, interval, rays_pts_depth = self.sample_ray(rays_o_i, rays_d_i, is_train=is_train, nonlinear_sample=nonlinear_sample)
+            rays_pts, mask_outbbox, interval, rays_pts_depth = self.sample_ray(
+                rays_o_i, rays_d_i, is_train=is_train, nonlinear_sample=nonlinear_sample)
 
         mask_rays_pts = rays_pts[~mask_outbbox]
         density = self.grid_sampler(mask_rays_pts, voxel, mode=mode)
@@ -262,7 +268,7 @@ class NeRFDecoderHead(nn.Module):
             probs = probs.diff(dim=1, prepend=torch.zeros((rays_pts.shape[:1])).unsqueeze(1).to('cuda'))
             depth = (probs * interval).sum(-1)
 
-            np.save("ray_weight_probs_frame25_student.npy", probs.cpu().numpy())
+            # np.save("ray_weight_probs_frame25_student.npy", probs.cpu().numpy())
 
             if force_render_rgb or self.img_recon_head:
                 rgb = self.grid_sampler(mask_rays_pts, rgb_recon)
@@ -281,7 +287,27 @@ class NeRFDecoderHead(nn.Module):
             else:
                 semantic_marched = depth
 
+        elif self.render_type == 'DVGO':
+            ## adapted from the RenderOcc
+            probs = torch.zeros_like(rays_pts[..., 0])
+            probs[:, -1] = 1
+            probs[~mask_outbbox] = density
+
+            alpha = Raw2Alpha.apply(probs.flatten(), 0, 0.5)
+            ray_id = torch.arange(rays_pts.shape[:2][0]).view(-1, 1).expand(rays_pts.shape[:2]).flatten().to(alpha.device)
+            weights, alphainv_last = Alphas2Weights.apply(alpha, ray_id.to(alpha.device), len(rays_pts))
+            weights = (weights.reshape(probs.shape) * interval).reshape(-1)
+            depth = segment_coo(
+                src=weights,
+                index=ray_id,
+                out=torch.zeros([len(rays_pts)]).to(weights.device),
+                reduce='sum') + 1e-7
+            semantic_marched = depth
+            rgb_marched = depth
+
         elif self.render_type == 'density':
+            # torch.cuda.synchronize()
+            # start = time.time()
             alpha = torch.zeros_like(rays_pts[..., 0])
             interval_list = interval[..., 1:] - interval[..., :-1]
             alpha[~mask_outbbox] = 1 - torch.exp(-F.softplus(density) * interval_list[0, -1])
@@ -305,6 +331,9 @@ class NeRFDecoderHead(nn.Module):
                 semantic_marched = torch.sum(weights[..., None] * semantic_cache, -2)
             else:
                 semantic_marched = depth
+            # torch.cuda.synchronize()
+            # end = time.time()
+            # print("inference time:", end - start)
         else:
             raise NotImplementedError
 
