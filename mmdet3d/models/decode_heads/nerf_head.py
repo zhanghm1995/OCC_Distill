@@ -253,7 +253,8 @@ class NeRFDecoderHead(nn.Module):
             else:
                 rays_o_i = rays_o[render_mask]
                 rays_d_i = rays_d[render_mask]
-            rays_pts, mask_outbbox, interval, rays_pts_depth = self.sample_ray(rays_o_i, rays_d_i, is_train=is_train, nonlinear_sample=nonlinear_sample)
+            rays_pts, mask_outbbox, interval, rays_pts_depth = self.sample_ray(
+                rays_o_i, rays_d_i, is_train=is_train, nonlinear_sample=nonlinear_sample)
 
         mask_rays_pts = rays_pts[~mask_outbbox]
         density = self.grid_sampler(mask_rays_pts, voxel, mode=mode)
