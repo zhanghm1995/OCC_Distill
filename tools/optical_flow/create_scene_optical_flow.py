@@ -14,6 +14,7 @@ import os.path as osp
 import pickle
 import cv2
 from tqdm import tqdm
+from copy import deepcopy
 import torch
 from pyquaternion import Quaternion
 import multiprocessing
@@ -249,9 +250,11 @@ def process_two_frames(frame1, frame2,
         pickle.dump(results, f)
 
 
-def process_two_frames_all_objects(frame1, frame2, 
+def process_two_frames_all_objects(frame1, 
+                                   frame2, 
                                    choose_cams, 
-                                   scene_save_dir, i, j):
+                                   scene_save_dir, 
+                                   i, j):
     sample_token1 = frame1['token']
     sample_token2 = frame2['token']
 
@@ -356,7 +359,7 @@ def process_two_frames_all_objects(frame1, frame2,
         results_coord1.append(coord1.numpy())
         results_coord2.append(coord2.numpy())
 
-        VISUALIZE = False
+        VISUALIZE = True
         if VISUALIZE:
             ## visualize the projected points
             img_path = frame1['cams'][cam]['data_path']
@@ -388,16 +391,16 @@ def process_one_scene(func, scene_name, scene_seq, neighbor_length=3,
 
     for i in range(num_frames - 1):
         for j in range(i + 1, min(i + 1 + neighbor_length, num_frames)):
-            frame1 = scene_seq[i]
-            frame2 = scene_seq[j]
+            frame1 = deepcopy(scene_seq[i])
+            frame2 = deepcopy(scene_seq[j])
             func(frame1, frame2, 
                  choose_cams, 
                  scene_save_dir, i, j)
 
     for i in range(num_frames - 1, 0, -1):
         for j in range(i - 1, max(i - 1 - neighbor_length, -1), -1):
-            frame1 = scene_seq[i]
-            frame2 = scene_seq[j]
+            frame1 = deepcopy(scene_seq[i])
+            frame2 = deepcopy(scene_seq[j])
             func(frame1, frame2, 
                  choose_cams, 
                  scene_save_dir, i, j)
@@ -540,8 +543,6 @@ def main_all_objects(anno_file):
     data_infos = list(sorted(data_infos, key=lambda e: e['timestamp']))
 
     scene_name_list, total_scene_seq = get_scene_sequence_data(data_infos)
-    scene_name_list = scene_name_list[35:80]
-    total_scene_seq = total_scene_seq[35:80]
     print(len(total_scene_seq), len(scene_name_list))
 
     choose_cams = [
@@ -549,8 +550,8 @@ def main_all_objects(anno_file):
         'CAM_BACK', 'CAM_BACK_RIGHT'
     ]
 
-    neighbor_length = 3
-    save_dir = "./data/nuscenes_scene_sequence_v1"
+    neighbor_length = 2
+    save_dir = "./data/nuscenes_scene_sequence"
     for idx, (scene_name, scene_seq) in tqdm(enumerate(zip(scene_name_list, total_scene_seq)),
                                              total=len(scene_name_list)):
         process_one_scene(process_two_frames_all_objects, 

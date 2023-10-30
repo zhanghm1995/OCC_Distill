@@ -25,7 +25,8 @@ data_config = {
     'input_size': (256, 704),
     # 'input_size': (224, 352), # SMALL FOR DEBUG
     'src_size': (900, 1600),
-    'render_size': (90, 160), # SMALL FOR DEBUG
+    # 'render_size': (90, 160), # SMALL FOR DEBUG
+    'render_size': (180, 320), # SMALL FOR DEBUG
     # 'render_size': (256, 704),
 
     # Augmentation

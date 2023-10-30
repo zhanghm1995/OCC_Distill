@@ -432,7 +432,8 @@ class NeRFOccPretrainHead(BaseModule):
                     semantic_pred[0], semantic_pred[1],
                     instance_mask[0], instance_mask[1],
                     sample_pts[0], sample_pts[1],
-                    loss_weight=self.loss_semantic_align_weight)
+                    loss_weight=self.loss_semantic_align_weight,
+                    **kwargs)
             else:
                 raise NotImplementedError()
             
@@ -564,7 +565,8 @@ class NeRFOccPretrainHead(BaseModule):
                                                     instance_mask_2,
                                                     sample_pts_1,
                                                     sample_pts_2,
-                                                    loss_weight=1.0):
+                                                    loss_weight=1.0,
+                                                    **kwargs):
         """_summary_
 
         Args:
@@ -598,6 +600,7 @@ class NeRFOccPretrainHead(BaseModule):
                                           instance_mask2_valid,
                                           dim=2)
         
+        VISUALIZE = True
         loss_semantic_temporal_align = 0.0
         for i in range(bs):
             for j in range(num_cam):
@@ -618,6 +621,60 @@ class NeRFOccPretrainHead(BaseModule):
                 # fetch the corresponding instance mask ids
                 instance_id_list_1 = curr_instance_map_1[selected_points1[:, 1], selected_points1[:, 0]]
                 instance_id_list_2 = curr_instance_map_2[selected_points2[:, 1], selected_points2[:, 0]]
+
+                if VISUALIZE:  # DEBUG ONLY
+                    if j != 1:
+                        continue
+                    import matplotlib.pyplot as plt
+                    import numpy as np
+                    import cv2
+                    from mmcv.image.photometric import imdenormalize
+
+                    mean = np.array([123.675, 116.28, 103.53], dtype=np.float32)
+                    std = np.array([58.395, 57.12, 57.375], dtype=np.float32)
+
+                    render_gt_img = kwargs['render_gt_img']  # (b*seq_len, num_cam, 3, h, w)
+                    render_gt_img = rearrange(
+                        render_gt_img, 
+                        '(b seq_len) (n_cam n_frame) c h w -> seq_len b n_frame n_cam h w c', 
+                        seq_len=2, n_frame=3)[:, :, 0]
+
+                    render_gt_img1 = render_gt_img[0][i, j].cpu().numpy()
+                    render_gt_img2 = render_gt_img[1][i, j].cpu().numpy()
+
+                    render_gt_img1 = imdenormalize(render_gt_img1, mean, std, to_bgr=False)
+                    render_gt_img2 = imdenormalize(render_gt_img2, mean, std, to_bgr=False)
+
+                    selected_points1 = selected_points1.cpu().numpy()
+                    selected_points2 = selected_points2.cpu().numpy()
+
+                    img1 = np.zeros((h, w, 3))
+                    img2 = np.zeros((h, w, 3))
+
+                    # draw circles
+                    for k in range(selected_points1.shape[0]):
+                        pt1 = (selected_points1[k, 0], selected_points1[k, 1])
+                        pt2 = (selected_points2[k, 0], selected_points2[k, 1])
+
+                        render_gt_img1 = cv2.circle(render_gt_img1, pt1, 2, (0, 0, 255), -1)
+                        render_gt_img2 = cv2.circle(render_gt_img2, pt1, 2, (0, 0, 255), -1)
+                        
+                        img1 = cv2.circle(img1, pt1, 2, (0, 0, 255), -1)
+                        img2 = cv2.circle(img2, pt2, 2, (0, 0, 255), -1)
+                    
+                    # concatenate the images
+                    img_bar = np.ones((h, 10, 3)) * 255
+
+                    render_gt_img_concat = np.concatenate(
+                        [render_gt_img1, img_bar, render_gt_img2], axis=1)
+                    
+                    img_concat = np.concatenate([img1, img_bar, img2], axis=1)
+
+                    # vertical concatenate
+                    img_save = np.concatenate([render_gt_img_concat, img_concat], axis=0)
+
+                    cv2.imwrite(f'debug_{i}_{j}.png', img_save.astype(np.uint8))
+                    exit()
 
                 # obtain the grouped semantic features according to the instance ids
                 curr_grouped_feats_1 = grouped_semantic_1[i, j, instance_id_list_1]  # (N, C)

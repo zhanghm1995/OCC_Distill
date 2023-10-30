@@ -12,6 +12,7 @@ import numpy as np
 from copy import deepcopy
 import os.path as osp
 import pickle
+from einops import rearrange, repeat
 from mmcv.parallel import collate
 from .builder import DATASETS
 from .nuscenes_dataset_occ import NuScenesDatasetOccpancy
@@ -27,9 +28,10 @@ class NuScenesDatasetOccPretrain(NuScenesDatasetOccpancy):
             dict: Data dictionary of the corresponding index.
         """
 
-        idx = 50
+        idx = 10  # TODO: DEBUG ONLY
         if self.test_mode:
             return self.prepare_test_data(idx)
+        
         while True:
             output = []
             data = self.prepare_train_data(idx)
@@ -37,8 +39,8 @@ class NuScenesDatasetOccPretrain(NuScenesDatasetOccpancy):
 
             # select the neiborhood frame
             temporal_interval = 1
-            if np.random.choice([0, 1]):
-                temporal_interval *= -1
+            # if np.random.choice([0, 1]):
+            #     temporal_interval *= -1
             
             # select the neiborhood frame
             select_idx = idx + temporal_interval
@@ -73,6 +75,62 @@ class NuScenesDatasetOccPretrain(NuScenesDatasetOccpancy):
                 coord1, coord2, render_size)
             output[0]['sample_pts_pad'] = torch.from_numpy(sample_pts_pad1).to(torch.long)
             output[1]['sample_pts_pad'] = torch.from_numpy(sample_pts_pad2).to(torch.long)
+
+            VISUALIZE = False
+            if VISUALIZE:  # DEBUG ONLY
+                import matplotlib.pyplot as plt
+                import cv2
+                from mmcv.image.photometric import imdenormalize
+
+                mean = np.array([123.675, 116.28, 103.53], dtype=np.float32)
+                std = np.array([58.395, 57.12, 57.375], dtype=np.float32)
+
+                render_gt_img1 = rearrange(
+                    data['render_gt_img'], 
+                    '(n_cam n_frame) c h w -> n_frame n_cam h w c', 
+                    n_frame=3)[0]
+                render_gt_img2 = rearrange(
+                    other_data['render_gt_img'],
+                    '(n_cam n_frame) c h w -> n_frame n_cam h w c',
+                    n_frame=3)[0]
+                
+                # render_gt_img1 = rearrange(
+                #     data['render_gt_img'], 
+                #     'n_cam c h w -> n_cam h w c')
+                # render_gt_img2 = rearrange(
+                #     other_data['render_gt_img'],
+                #     'n_cam c h w -> n_cam h w c')
+
+                # we only visualize one camera
+                cam_idx = 1
+                render_gt_img1 = render_gt_img1[cam_idx].cpu().numpy()
+                render_gt_img2 = render_gt_img2[cam_idx].cpu().numpy()
+
+                render_gt_img1 = imdenormalize(render_gt_img1, mean, std, to_bgr=False)
+                render_gt_img2 = imdenormalize(render_gt_img2, mean, std, to_bgr=False)
+
+                num_valid_pts = int(sample_pts_pad1[cam_idx][-1, 0])
+                selected_points1 = sample_pts_pad1[cam_idx][:num_valid_pts]
+                selected_points2 = sample_pts_pad2[cam_idx][:num_valid_pts]
+
+                # draw circles
+                for k in range(selected_points1.shape[0]):
+                    pt1 = (int(selected_points1[k, 0]), int(selected_points1[k, 1]))
+                    pt2 = (int(selected_points2[k, 0]), int(selected_points2[k, 1]))
+
+                    render_gt_img1 = cv2.circle(render_gt_img1, pt1, 1, (0, 0, 255), -1)
+                    render_gt_img2 = cv2.circle(render_gt_img2, pt2, 1, (0, 0, 255), -1)
+                    
+                # concatenate the images
+                h, w, c = render_gt_img1.shape
+                img_bar = np.ones((h, 10, 3)) * 255
+
+                render_gt_img_concat = np.concatenate(
+                    [render_gt_img1, img_bar, render_gt_img2], axis=1)
+                
+                # vertical concatenate
+                cv2.imwrite('debug_origin7.png', render_gt_img_concat.astype(np.uint8))
+                exit()
             
             # collate these two frames together
             res = collate(output, samples_per_gpu=1)
