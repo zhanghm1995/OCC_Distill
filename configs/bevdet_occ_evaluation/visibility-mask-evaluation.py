@@ -43,24 +43,16 @@ train_pipeline = [
 
 test_pipeline = [
     dict(
-        type='LoadPointsFromFile',
-        coord_type='LIDAR',
-        load_dim=5,
-        use_dim=5,
-        file_client_args=file_client_args),
-    dict(type='PointToEgo'),
-    dict(
         type='MultiScaleFlipAug3D',
         img_scale=(1333, 800),
         pts_scale_ratio=1,
         flip=False,
         transforms=[
-            dict(type='PointsRangeFilter', point_cloud_range=point_cloud_range),
             dict(
                 type='DefaultFormatBundle3D',
                 class_names=class_names,
                 with_label=False),
-            dict(type='Collect3D', keys=['points'])
+            dict(type='Collect3D', keys=[])
         ])
 ]
 
@@ -81,7 +73,7 @@ share_data_config = dict(
 
 test_data_config = dict(
     pipeline=test_pipeline,
-    ann_file=data_root + 'bevdetv2-nuscenes_infos_val.pkl')
+    ann_file=data_root + 'bevdetv2-nuscenes_infos_val-quarter.pkl')
 
 data = dict(
     samples_per_gpu=4,

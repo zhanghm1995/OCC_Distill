@@ -78,6 +78,7 @@ def parse_args():
     parser.add_argument(
         '--no-aavt',
         action='store_true',
+        default=True,
         help='Do not align after view transformer.')
     parser.add_argument(
         '--tmpdir',
@@ -219,6 +220,12 @@ def main():
     checkpoint = load_checkpoint(model, args.checkpoint, map_location='cpu')
     if args.fuse_conv_bn:
         model = fuse_conv_bn(model)
+
+    sync_bn = cfg.get('sync_bn', False)
+    if distributed and sync_bn:
+        model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
+        print('Convert to SyncBatchNorm')
+    
     # old versions did not save class info in checkpoints, this walkaround is
     # for backward compatibility
     if 'CLASSES' in checkpoint.get('meta', {}):

@@ -36,6 +36,8 @@ data_config = {
     'resize_test': 0.00,
 }
 
+sync_bn = True
+
 # Model
 grid_config = {
     'x': [-51.2, 51.2, 0.8],
@@ -245,7 +247,7 @@ test_data_config = dict(
     ann_file=data_root + 'bevdetv2-nuscenes_infos_val.pkl')
 
 data = dict(
-    samples_per_gpu=16,
+    samples_per_gpu=8,
     workers_per_gpu=4,
     train=dict(
         data_root=data_root,
@@ -285,5 +287,7 @@ custom_hooks = [
         temporal_start_epoch=2,
     ),
 ]
+
+checkpoint_config = dict(interval=1, max_keep_ckpts=10)
 
 # fp16 = dict(loss_scale='dynamic')
