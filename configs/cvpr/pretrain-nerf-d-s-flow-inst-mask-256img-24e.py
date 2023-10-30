@@ -175,7 +175,8 @@ train_pipeline = [
          is_train=True,
          data_config=data_config,
          sequential=False,
-         instance_mask_dir='data/nuscenes/superpixels_sam'),
+         mode='json',
+         instance_mask_dir='data/nuscenes/sam_mask_json'),
     dict(type='DefaultFormatBundle3D', class_names=class_names),
     dict(
         type='Collect3D', keys=['img_inputs', 'gt_depth', 
