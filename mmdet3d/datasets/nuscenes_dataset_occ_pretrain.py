@@ -68,7 +68,7 @@ class NuScenesDatasetOccPretrain(NuScenesDatasetOccpancy):
             coord1 = scene_flow_dict['coord1']  # (u, v) coordinate
             coord2 = scene_flow_dict['coord2']
 
-            render_size = data['render_gt_depth'].shape[-2:]
+            render_size = data['render_gt_depth'].shape[-2:]  # (h, w)
             sample_pts_pad1, sample_pts_pad2 = self.unify_sample_points(
                 coord1, coord2, render_size)
             output[0]['sample_pts_pad'] = torch.from_numpy(sample_pts_pad1).to(torch.long)

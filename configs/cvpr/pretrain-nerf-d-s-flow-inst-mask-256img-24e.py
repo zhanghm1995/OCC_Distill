@@ -51,7 +51,7 @@ numC_Trans = 32
 multi_adj_frame_id_cfg = (1, 1 + 1, 1)
 
 model = dict(
-    type='BEVStereo4DOCCTemporalNeRFPretrain',
+    type='BEVStereo4DOCCTemporalNeRFPretrainV2',
     align_after_view_transfromation=False,
     num_adj=len(range(*multi_adj_frame_id_cfg)),
     
@@ -126,8 +126,6 @@ model = dict(
         stride=[1, ],
         backbone_output_ids=[0, ]),
 
-    loss_compare=dict(type='MSELoss', 
-                      loss_weight=1.0),
     pretrain_head=dict(
         type='NeRFOccPretrainHead',
         semantic_align_type='query_flow_background', 

@@ -8,6 +8,7 @@ import torch
 from PIL import Image
 from pyquaternion import Quaternion
 import pycocotools.mask as maskUtils
+from torchvision import transforms as T
 
 from mmdet3d.core.points import BasePoints, get_points_type
 from mmdet.datasets.pipelines import LoadAnnotations, LoadImageFromFile
@@ -1819,6 +1820,8 @@ class LoadInstanceMaskFromFile(PrepareImageInputsForNeRF):
         self.render_size = data_config['render_size']
         self.mode = mode
         self.instance_mask_dir = instance_mask_dir
+        self.transform = T.Resize(self.render_size, 
+                                  interpolation=Image.NEAREST)
 
     def __call__(self, results):
         if self.mode == 'json':
@@ -1846,6 +1849,7 @@ class LoadInstanceMaskFromFile(PrepareImageInputsForNeRF):
                 indices = torch.arange(1, N + 1).view(N, 1, 1)
                 transformed_mask = all_valid_mask * indices
                 mask = torch.max(transformed_mask, dim=0)[0]
+                mask = self.transform(mask[None]).squeeze(0)  # resize
                 mask = mask - 1  # -1 means we donot detect any instances in these regions
                 instance_imgs.append(mask)
         elif self.mode == 'png':

@@ -922,6 +922,7 @@ class BEVStereo4DOCCTemporalNeRFPretrainV2(BEVStereo4DOCCNeRFRretrain):
         density_prob_flip = self.inverse_flip_aug(density_prob, flip_dx, flip_dy)
 
         # random view selection
+        rand_ind = None
         if self.num_random_view != -1:
             rand_ind = torch.multinomial(
                 torch.tensor([1 / self.num_random_view] * 6), 
@@ -969,7 +970,7 @@ class BEVStereo4DOCCTemporalNeRFPretrainV2(BEVStereo4DOCCNeRFRretrain):
                     feats_dict['render_semantic'] = semantic_pred
 
                 losses = self.pretrain_head.loss(feats_dict, 
-                                                rand_view_idx=rand_ind, 
-                                                **kwargs)
+                                                 rand_view_idx=rand_ind, 
+                                                 **kwargs)
 
         return losses

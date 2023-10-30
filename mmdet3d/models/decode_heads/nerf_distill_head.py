@@ -586,24 +586,34 @@ class NeRFOccPretrainHead(BaseModule):
 
         ## scatter the features according to the instance mask
         ## NOTE: the results of scatter_mean will be sorted according to the instance ids
+        instance_mask1_valid = instance_mask_1.clone()
+        instance_mask1_valid[instance_mask1_valid == -1] = instance_mask1_valid.max() + 1
         grouped_semantic_1 = scatter_mean(render_semantic_1,
-                                          instance_mask_1,
+                                          instance_mask1_valid,
                                           dim=2)
+        
+        instance_mask2_valid = instance_mask_2.clone()
+        instance_mask2_valid[instance_mask2_valid == -1] = instance_mask2_valid.max() + 1
         grouped_semantic_2 = scatter_mean(render_semantic_2,
-                                          instance_mask_2,
+                                          instance_mask2_valid,
                                           dim=2)
+        
         loss_semantic_temporal_align = 0.0
         for i in range(bs):
             for j in range(num_cam):
                 curr_instance_map_1 = instance_mask_1[i, j].reshape(h, w)
-                # NOTE: here we only select the pixels from the first frame
-                selected_points_indices = self.sample_points(
-                    curr_instance_map_1, sample_pts_1[i, j])
-
                 curr_instance_map_2 = instance_mask_2[i, j].reshape(h, w)
 
-                selected_points1 = sample_pts_1[i, j][selected_points_indices]
-                selected_points2 = sample_pts_2[i, j][selected_points_indices]
+                curr_sample_pts_1 = sample_pts_1[i, j]
+                curr_sample_pts_2 = sample_pts_2[i, j]
+
+                # NOTE: here we only select the pixels from the first frame
+                selected_points_indices = self.sample_both_valid_points(
+                    curr_instance_map_1, curr_sample_pts_1,
+                    curr_instance_map_2, curr_sample_pts_2)
+
+                selected_points1 = curr_sample_pts_1[selected_points_indices]
+                selected_points2 = curr_sample_pts_2[selected_points_indices]
 
                 # fetch the corresponding instance mask ids
                 instance_id_list_1 = curr_instance_map_1[selected_points1[:, 1], selected_points1[:, 0]]
@@ -673,6 +683,9 @@ class NeRFOccPretrainHead(BaseModule):
         all_selected_pixels = []
         for i in range(len(unique_sampled_inst_ids)):
             valid_indices = torch.nonzero(sampled_mask[..., i])
+            if valid_indices.size(0) <= num_selected_pixels:
+                continue
+
             # randomly select the points
             selected_indices = torch.randperm(valid_indices.size(0))[:num_selected_pixels]
             selected_indices_raw = valid_indices[selected_indices].squeeze()
@@ -680,4 +693,39 @@ class NeRFOccPretrainHead(BaseModule):
         
         all_selected_pixels = torch.stack(all_selected_pixels, dim=0)
         return all_selected_pixels
+    
+    def sample_both_valid_points(self, 
+                                 instance_mask1, sample_pts1,
+                                 instance_mask2, sample_pts2):
+        num_selected_pixels = 1  # the number of selected pixels for each instance
+
+        num_valid_pts = sample_pts1[-1, 0]
+        sample_pts1 = sample_pts1[:num_valid_pts]
+        
+        # obtain the valid points
+        sampled_instance_mask = instance_mask1[sample_pts1[:, 1], sample_pts1[:, 0]]  # (N,)
+        unique_sampled_inst_ids = torch.unique(sampled_instance_mask)
+        sampled_mask = (sampled_instance_mask.unsqueeze(-1) == unique_sampled_inst_ids)
+
+        all_selected_points_indices = []
+        for i in range(len(unique_sampled_inst_ids)):
+            if unique_sampled_inst_ids[i] == -1:
+                continue
+
+            valid_indices = torch.nonzero(sampled_mask[..., i])
+            if valid_indices.size(0) <= num_selected_pixels:
+                continue
+            
+            # randomly select the points
+            selected_indices = torch.randperm(valid_indices.size(0))[:num_selected_pixels]
+            selected_indices_raw = valid_indices[selected_indices].squeeze(1)
+
+            # check whether this point is valid in the second frame
+            instance_id2 = sample_pts2[selected_indices_raw]
+            if torch.any(instance_mask2[instance_id2[:, 1], instance_id2[:, 0]] == -1):
+                continue
+            all_selected_points_indices.extend(selected_indices_raw)
+        
+        all_selected_points_indices = torch.stack(all_selected_points_indices, dim=0)
+        return all_selected_points_indices
 
