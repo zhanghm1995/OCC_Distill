@@ -92,10 +92,23 @@ class BEVDetRenderOcc(BEVStereo4DOCC):
         density_target = (voxel_semantics==17).long()
         semantic_mask = voxel_semantics!=17
 
+        mask_camera = mask_camera.to(torch.int32)
+        mask_camera = mask_camera.reshape(-1)
+        num_total_samples = mask_camera.sum()
+
         # compute loss
-        loss_geo = self.loss_occ(density_prob, density_target)
-        loss_sem = self.semantic_loss(semantic[semantic_mask], 
-                                      voxel_semantics[semantic_mask].long())
+        if self.use_mask:
+            loss_geo = self.loss_occ(density_prob, density_target,
+                                     mask_camera,
+                                     avg_factor=num_total_samples)
+            loss_sem = self.semantic_loss(semantic[semantic_mask], 
+                                          voxel_semantics[semantic_mask].long(),
+                                          mask_camera,
+                                          avg_factor=num_total_samples)
+        else:
+            loss_geo = self.loss_occ(density_prob, density_target)
+            loss_sem = self.semantic_loss(semantic[semantic_mask], 
+                                        voxel_semantics[semantic_mask].long())
 
         loss_ = dict()
         loss_['loss_3d_geo'] = loss_geo
@@ -111,8 +124,8 @@ class BEVDetRenderOcc(BEVStereo4DOCC):
                     **kwargs):
         """Test function without augmentaiton."""
         # extract volumn feature
-        img_inputs = self.prepare_inputs(img, stereo=True)
-        img_feats, _ = self.extract_img_feat(img_inputs, img_metas, **kwargs)
+        img_feats, _, _ = self.extract_feat(
+            points, img=img, img_metas=img_metas, **kwargs)
         voxel_feats = self.final_conv(img_feats[0]).permute(0, 4, 3, 2, 1) # bncdhw->bnwhdc
         
         # predict SDF

@@ -105,7 +105,7 @@ model = dict(
         type='CrossEntropyLoss',
         use_sigmoid=False,
         loss_weight=1.0),
-    use_mask=True,
+    use_mask=False,
 )
 
 # Data
@@ -241,4 +241,4 @@ log_config = dict(
         dict(type='TensorboardLoggerHook')
     ])
 
-load_from = "bevdet-r50-4d-stereo-cbgs.pth"
+load_from = "ckpts/bevdet-r50-4d-stereo-cbgs.pth"
