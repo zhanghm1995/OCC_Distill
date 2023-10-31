@@ -76,7 +76,7 @@ class NuScenesDatasetOccPretrain(NuScenesDatasetOccpancy):
             output[0]['sample_pts_pad'] = torch.from_numpy(sample_pts_pad1).to(torch.long)
             output[1]['sample_pts_pad'] = torch.from_numpy(sample_pts_pad2).to(torch.long)
 
-            VISUALIZE = False
+            VISUALIZE = True
             if VISUALIZE:  # DEBUG ONLY
                 import matplotlib.pyplot as plt
                 import cv2
@@ -110,6 +110,7 @@ class NuScenesDatasetOccPretrain(NuScenesDatasetOccpancy):
                 render_gt_img2 = imdenormalize(render_gt_img2, mean, std, to_bgr=False)
 
                 num_valid_pts = int(sample_pts_pad1[cam_idx][-1, 0])
+                num_valid_pts = 150
                 selected_points1 = sample_pts_pad1[cam_idx][:num_valid_pts]
                 selected_points2 = sample_pts_pad2[cam_idx][:num_valid_pts]
 
@@ -129,7 +130,7 @@ class NuScenesDatasetOccPretrain(NuScenesDatasetOccpancy):
                     [render_gt_img1, img_bar, render_gt_img2], axis=1)
                 
                 # vertical concatenate
-                cv2.imwrite('debug_origin7.png', render_gt_img_concat.astype(np.uint8))
+                cv2.imwrite(f'debug_origin_{idx}_{select_idx}.png', render_gt_img_concat.astype(np.uint8))
                 exit()
             
             # collate these two frames together
