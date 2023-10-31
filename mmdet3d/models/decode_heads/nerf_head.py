@@ -296,13 +296,25 @@ class NeRFDecoderHead(nn.Module):
             alpha = Raw2Alpha.apply(probs.flatten(), 0, 0.5)
             ray_id = torch.arange(rays_pts.shape[:2][0]).view(-1, 1).expand(rays_pts.shape[:2]).flatten().to(alpha.device)
             weights, alphainv_last = Alphas2Weights.apply(alpha, ray_id.to(alpha.device), len(rays_pts))
-            weights = (weights.reshape(probs.shape) * interval).reshape(-1)
             depth = segment_coo(
-                src=weights,
+                src=(weights.reshape(probs.shape) * interval).reshape(-1),
                 index=ray_id,
                 out=torch.zeros([len(rays_pts)]).to(weights.device),
                 reduce='sum') + 1e-7
-            semantic_marched = depth
+            
+            if self.semantic_head:
+                semantic = self.grid_sampler(mask_rays_pts, semantic_recon)
+                B, N = rays_pts.shape[:2]
+                semantic_cache = torch.zeros((B, N, semantic_recon.shape[0])).to(rays_pts.device)
+                semantic_cache[~mask_outbbox] = semantic  # 473088, 287, 3
+
+                semantic_marched = segment_coo(
+                    src=(weights * semantic_cache),
+                    index=ray_id,
+                    out=torch.zeros([len(rays_pts), semantic.shape[-1]]).to(weights.device),
+                    reduce='sum')
+            else:
+                semantic_marched = depth
             rgb_marched = depth
 
         elif self.render_type == 'density':
