@@ -18,6 +18,19 @@ from .builder import DATASETS
 from .nuscenes_dataset_occ import NuScenesDatasetOccpancy
 
 
+def visualize_instance_image(instance_mask):
+    instance_img = np.zeros((*instance_mask.shape, 4), dtype=np.uint8)
+
+    unique_id = np.unique(instance_mask)
+    for id in unique_id:
+        if id == -1:
+            continue
+        # color = np.random.random(3) * 255
+        color = np.concatenate([np.random.random(3), [0.7]]) * 255
+        instance_img[instance_mask == id] = color
+    return instance_img
+
+
 @DATASETS.register_module()
 class NuScenesDatasetOccPretrain(NuScenesDatasetOccpancy):
 
@@ -76,7 +89,7 @@ class NuScenesDatasetOccPretrain(NuScenesDatasetOccpancy):
             output[0]['sample_pts_pad'] = torch.from_numpy(sample_pts_pad1).to(torch.long)
             output[1]['sample_pts_pad'] = torch.from_numpy(sample_pts_pad2).to(torch.long)
 
-            VISUALIZE = True
+            VISUALIZE = False
             if VISUALIZE:  # DEBUG ONLY
                 import matplotlib.pyplot as plt
                 import cv2
@@ -109,28 +122,50 @@ class NuScenesDatasetOccPretrain(NuScenesDatasetOccpancy):
                 render_gt_img1 = imdenormalize(render_gt_img1, mean, std, to_bgr=False)
                 render_gt_img2 = imdenormalize(render_gt_img2, mean, std, to_bgr=False)
 
+                instance_mask1 = data['instance_masks'][cam_idx].cpu().numpy()
+                instance_mask2 = other_data['instance_masks'][cam_idx].cpu().numpy()
+
                 num_valid_pts = int(sample_pts_pad1[cam_idx][-1, 0])
-                num_valid_pts = 150
                 selected_points1 = sample_pts_pad1[cam_idx][:num_valid_pts]
                 selected_points2 = sample_pts_pad2[cam_idx][:num_valid_pts]
 
                 # draw circles
+                center = np.median(selected_points1, axis=0)
+                set_max = range(128)
+                colors = {m: i for i, m in enumerate(set_max)}
+                colors = {m: (255 * np.array(plt.cm.hsv(i/float(len(colors))))[:3][::-1]).astype(np.int32)
+                            for m, i in colors.items()}
+                
+                instance_img1 = visualize_instance_image(instance_mask1)
+                instance_img2 = visualize_instance_image(instance_mask2)
+
                 for k in range(selected_points1.shape[0]):
                     pt1 = (int(selected_points1[k, 0]), int(selected_points1[k, 1]))
                     pt2 = (int(selected_points2[k, 0]), int(selected_points2[k, 1]))
 
-                    render_gt_img1 = cv2.circle(render_gt_img1, pt1, 1, (0, 0, 255), -1)
-                    render_gt_img2 = cv2.circle(render_gt_img2, pt2, 1, (0, 0, 255), -1)
-                    
+                    coord_angle = np.arctan2(pt1[1] - center[1], pt1[0] - center[0])
+                    corr_color = np.int32(64 * coord_angle / np.pi) % 128
+                    color = tuple(colors[corr_color].tolist())
+
+                    render_gt_img1 = cv2.circle(render_gt_img1, pt1, 1, color, -1, cv2.LINE_AA)
+                    render_gt_img2 = cv2.circle(render_gt_img2, pt2, 1, color, -1, cv2.LINE_AA)
+
+                    instance_img1 = cv2.circle(instance_img1, pt1, 1, color, -1, cv2.LINE_AA)
+                    instance_img2 = cv2.circle(instance_img2, pt2, 1, color, -1, cv2.LINE_AA)
+                
                 # concatenate the images
                 h, w, c = render_gt_img1.shape
                 img_bar = np.ones((h, 10, 3)) * 255
 
                 render_gt_img_concat = np.concatenate(
                     [render_gt_img1, img_bar, render_gt_img2], axis=1)
-                
-                # vertical concatenate
                 cv2.imwrite(f'debug_origin_{idx}_{select_idx}.png', render_gt_img_concat.astype(np.uint8))
+
+                img_bar = np.ones((h, 10, 4)) * 255
+                instance_img_concat = np.concatenate(
+                    [instance_img1, img_bar, instance_img2], axis=1)
+                cv2.imwrite(f'debug_instance_{idx}_{select_idx}.png', instance_img_concat.astype(np.uint8))
+                
                 exit()
             
             # collate these two frames together

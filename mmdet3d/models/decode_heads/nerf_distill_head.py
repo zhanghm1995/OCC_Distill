@@ -600,7 +600,7 @@ class NeRFOccPretrainHead(BaseModule):
                                           instance_mask2_valid,
                                           dim=2)
         
-        VISUALIZE = True
+        VISUALIZE = False
         loss_semantic_temporal_align = 0.0
         for i in range(bs):
             for j in range(num_cam):
@@ -652,15 +652,24 @@ class NeRFOccPretrainHead(BaseModule):
                     img2 = np.zeros((h, w, 3))
 
                     # draw circles
+                    center = np.median(selected_points1, axis=0)
+                    set_max = range(128)
+                    colors = {m: i for i, m in enumerate(set_max)}
+                    colors = {m: (255 * np.array(plt.cm.hsv(i/float(len(colors))))[:3][::-1]).astype(np.int32)
+                                for m, i in colors.items()}
                     for k in range(selected_points1.shape[0]):
-                        pt1 = (selected_points1[k, 0], selected_points1[k, 1])
-                        pt2 = (selected_points2[k, 0], selected_points2[k, 1])
+                        pt1 = (int(selected_points1[k, 0]), int(selected_points1[k, 1]))
+                        pt2 = (int(selected_points2[k, 0]), int(selected_points2[k, 1]))
 
-                        render_gt_img1 = cv2.circle(render_gt_img1, pt1, 2, (0, 0, 255), -1)
-                        render_gt_img2 = cv2.circle(render_gt_img2, pt1, 2, (0, 0, 255), -1)
+                        coord_angle = np.arctan2(pt1[1] - center[1], pt1[0] - center[0])
+                        corr_color = np.int32(64 * coord_angle / np.pi) % 128
+                        color = tuple(colors[corr_color].tolist())
+
+                        render_gt_img1 = cv2.circle(render_gt_img1, pt1, 1, color, -1)
+                        render_gt_img2 = cv2.circle(render_gt_img2, pt2, 1, color, -1)
                         
-                        img1 = cv2.circle(img1, pt1, 2, (0, 0, 255), -1)
-                        img2 = cv2.circle(img2, pt2, 2, (0, 0, 255), -1)
+                        img1 = cv2.circle(img1, pt1, 2, color, -1)
+                        img2 = cv2.circle(img2, pt2, 2, color, -1)
                     
                     # concatenate the images
                     img_bar = np.ones((h, 10, 3)) * 255
@@ -672,8 +681,7 @@ class NeRFOccPretrainHead(BaseModule):
 
                     # vertical concatenate
                     img_save = np.concatenate([render_gt_img_concat, img_concat], axis=0)
-
-                    cv2.imwrite(f'debug_{i}_{j}.png', img_save.astype(np.uint8))
+                    cv2.imwrite(f'debug_nerf_head_{i}_{j}.png', img_save.astype(np.uint8))
                     exit()
 
                 # obtain the grouped semantic features according to the instance ids
