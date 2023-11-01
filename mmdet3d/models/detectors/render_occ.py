@@ -36,6 +36,8 @@ class BEVDetRenderOcc(BEVStereo4DOCC):
                  use_3d_loss=True,
                  balance_cls_weight=True,
                  final_softplus=False,
+                 use_mask=True,
+                 use_origin_testing=True,
                  **kwargs):
         super(BEVDetRenderOcc, self).__init__(use_predicter=False, **kwargs)
         self.out_dim = out_dim
@@ -44,6 +46,8 @@ class BEVDetRenderOcc(BEVStereo4DOCC):
         self.use_lss_depth_loss = use_lss_depth_loss
         self.balance_cls_weight = balance_cls_weight
         self.final_softplus = final_softplus
+        self.use_mask = use_mask
+        self.use_origin_testing = use_origin_testing
 
         if self.balance_cls_weight:
             self.class_weights = torch.from_numpy(1 / np.log(nusc_class_frequencies[:17] + 0.001)).float()
@@ -92,23 +96,22 @@ class BEVDetRenderOcc(BEVStereo4DOCC):
         density_target = (voxel_semantics==17).long()
         semantic_mask = voxel_semantics!=17
 
-        mask_camera = mask_camera.to(torch.int32)
-        mask_camera = mask_camera.reshape(-1)
-        num_total_samples = mask_camera.sum()
-
         # compute loss
         if self.use_mask:
-            loss_geo = self.loss_occ(density_prob, density_target,
-                                     mask_camera,
-                                     avg_factor=num_total_samples)
+            mask_camera = mask_camera.to(torch.bool)
+            mask_camera = mask_camera.reshape(-1)
+            
+            density_prob = density_prob[mask_camera]
+            density_target = density_target[mask_camera]
+            loss_geo = self.loss_occ(density_prob, density_target)
+
+            semantic_mask = semantic_mask[mask_camera]
             loss_sem = self.semantic_loss(semantic[semantic_mask], 
-                                          voxel_semantics[semantic_mask].long(),
-                                          mask_camera,
-                                          avg_factor=num_total_samples)
+                                          voxel_semantics[semantic_mask].long())
         else:
             loss_geo = self.loss_occ(density_prob, density_target)
             loss_sem = self.semantic_loss(semantic[semantic_mask], 
-                                        voxel_semantics[semantic_mask].long())
+                                          voxel_semantics[semantic_mask].long())
 
         loss_ = dict()
         loss_['loss_3d_geo'] = loss_geo
@@ -134,7 +137,12 @@ class BEVDetRenderOcc(BEVStereo4DOCC):
         semantic = self.semantic_mlp(voxel_feats)
 
         # SDF --> Occupancy
-        no_empty_mask = density > self.test_threshold
+        if self.use_origin_testing:
+            no_empty_mask = density > self.test_threshold
+        else:
+            density_score = density_prob.softmax(-1)
+            no_empty_mask = density_score[..., 0] > density_score[..., 1]
+        
         semantic_res = semantic.argmax(-1)
 
         B, H, W, Z, C = voxel_feats.shape
