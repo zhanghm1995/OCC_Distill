@@ -36,7 +36,7 @@ class BEVDetRenderOcc(BEVStereo4DOCC):
                  use_3d_loss=True,
                  balance_cls_weight=True,
                  final_softplus=False,
-                 use_mask=True,
+                 use_mask=False,
                  use_origin_testing=True,
                  **kwargs):
         super(BEVDetRenderOcc, self).__init__(use_predicter=False, **kwargs)
