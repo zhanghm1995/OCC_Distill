@@ -26,7 +26,7 @@ data_config = {
     # 'input_size': (224, 352), # SMALL FOR DEBUG
     'src_size': (900, 1600),
     # 'render_size': (90, 160), # SMALL FOR DEBUG
-    'render_size': (180, 320), # SMALL FOR DEBUG
+    'render_size': (180, 320),
     # 'render_size': (256, 704),
 
     # Augmentation
@@ -77,7 +77,7 @@ model = dict(
     ## the nerf decoder head
     nerf_head=dict(
         type='NeRFDecoderHead',
-        num_random_view=-1,
+        num_random_view=3,
         mask_render=False,
         img_recon_head=False,
         semantic_head=True,
@@ -89,7 +89,7 @@ model = dict(
         render_type='DVGO',  # ['DVGO', 'prob', 'density']
         render_size=data_config['render_size'],
         depth_range=grid_config['depth'][:2],
-        loss_nerf_weight=0.5,
+        loss_nerf_weight=1.0,
         depth_loss_type='silog',  # ['silog', 'l1', 'rl1', 'sml1']
         variance_focus=0.85,  # only for silog loss
     ),
@@ -151,8 +151,8 @@ train_pipeline = [
         is_train=True,
         data_config=data_config,
         sequential=True),
-    dict(type='LoadOccGTFromFile'),
-    dict(type='LoadLiDARSegGTFromFile'),
+    # dict(type='LoadOccGTFromFile'),
+    # dict(type='LoadLiDARSegGTFromFile'),
     dict(
         type='LoadAnnotationsBEVDepth',
         bda_aug_conf=bda_aug_conf,
@@ -179,10 +179,9 @@ train_pipeline = [
     dict(type='DefaultFormatBundle3D', class_names=class_names),
     dict(
         type='Collect3D', keys=['img_inputs', 'gt_depth', 
-                                'img_semantic', 'instance_masks',
+                                'instance_masks', 'render_gt_depth',
                                 'intricics', 'pose_spatial', 
-                                'flip_dx', 'flip_dy', 
-                                'render_gt_img', 'render_gt_depth'])
+                                'flip_dx', 'flip_dy'])
 ]
 
 test_pipeline = [
@@ -277,7 +276,7 @@ custom_hooks = [
 ]
 
 log_config = dict(
-    interval=50,
+    interval=1,
     hooks=[
         dict(type='TextLoggerHook'),
         dict(type='TensorboardLoggerHook')

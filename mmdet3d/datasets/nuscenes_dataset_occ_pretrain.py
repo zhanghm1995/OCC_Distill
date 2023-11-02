@@ -41,7 +41,9 @@ class NuScenesDatasetOccPretrain(NuScenesDatasetOccpancy):
             dict: Data dictionary of the corresponding index.
         """
 
-        idx = 10  # TODO: DEBUG ONLY
+        # import time
+        # start = time.time()
+
         if self.test_mode:
             return self.prepare_test_data(idx)
         
@@ -55,37 +57,49 @@ class NuScenesDatasetOccPretrain(NuScenesDatasetOccpancy):
             # if np.random.choice([0, 1]):
             #     temporal_interval *= -1
             
-            # select the neiborhood frame
             select_idx = idx + temporal_interval
             select_idx = np.clip(select_idx, 0, len(self) - 1)
-            if self.data_infos[select_idx]['scene_token'] == self.data_infos[idx][
-                'scene_token']:
-                other_data = self.prepare_train_data(select_idx)
-            else:
-                other_data = deepcopy(data)
-            
+            if self.data_infos[select_idx]['token'] == self.data_infos[idx]['token'] or \
+                self.data_infos[select_idx]['scene_token'] != self.data_infos[idx]['scene_token']:
+                idx = self._rand_another(idx)
+                continue
+
+            other_data = self.prepare_train_data(select_idx)
+
             output.append(other_data)
 
             if any([x is None for x in output]):
                 idx = self._rand_another(idx)
                 continue
 
-            # load the scene flow TODO: when these two data are same, we need to generate a fake scene flow
+            # load the scene flow
             scene_token = self.data_infos[idx]['scene_token']
             sample_token1 = data['img_metas'].data['sample_idx']
             sample_token2 = other_data['img_metas'].data['sample_idx']
 
-            scene_flow_fp = osp.join("./data/nuscenes_scene_sequence",
+            scene_flow_fp = osp.join("./data/nuscenes/nuscenes_scene_sequence_npz",
                                      scene_token, 
-                                     sample_token1 + "_" + sample_token2 + ".pkl")
-            with open(scene_flow_fp, 'rb') as f:
-                scene_flow_dict = pickle.load(f)
-            coord1 = scene_flow_dict['coord1']  # (u, v) coordinate
-            coord2 = scene_flow_dict['coord2']
+                                     sample_token1 + "_" + sample_token2 + ".npz")
+            
+            if scene_flow_fp.endswith('pkl'):
+                with open(scene_flow_fp, 'rb') as f:
+                    scene_flow_dict = pickle.load(f)
+                coord1 = scene_flow_dict['coord1']  # NOTE: (u, v) coordinate
+                coord2 = scene_flow_dict['coord2']
 
-            render_size = data['render_gt_depth'].shape[-2:]  # (h, w)
-            sample_pts_pad1, sample_pts_pad2 = self.unify_sample_points(
-                coord1, coord2, render_size)
+                render_size = data['render_gt_depth'].shape[-2:]  # (h, w)
+                sample_pts_pad1, sample_pts_pad2 = self.unify_sample_points(
+                    coord1, coord2, render_size)
+            elif scene_flow_fp.endswith('npz'):
+                scene_flow_dict = np.load(scene_flow_fp)
+
+                # TODO: need add processing when not using (900, 1600) render size
+                # and please note that the last dimension is the number of points
+                sample_pts_pad1 = scene_flow_dict['coord1']  # (n_cam, n_points, 2)
+                sample_pts_pad2 = scene_flow_dict['coord2']
+            else:
+                raise NotImplementedError
+            
             output[0]['sample_pts_pad'] = torch.from_numpy(sample_pts_pad1).to(torch.long)
             output[1]['sample_pts_pad'] = torch.from_numpy(sample_pts_pad2).to(torch.long)
 
@@ -170,6 +184,10 @@ class NuScenesDatasetOccPretrain(NuScenesDatasetOccpancy):
             
             # collate these two frames together
             res = collate(output, samples_per_gpu=1)
+
+            # end = time.time()
+            # print("Data time:", end - start)
+
             return res
         
     def unify_sample_points(self, coords1, coords2, render_size=(900, 1600)):

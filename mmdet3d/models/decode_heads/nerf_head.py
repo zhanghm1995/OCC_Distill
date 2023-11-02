@@ -141,11 +141,11 @@ class NeRFDecoderHead(nn.Module):
         self.render_type = render_type
         self.num_voxels = voxels_size[0] * voxels_size[1] * voxels_size[2]
         self.voxel_size = ((self.xyz_max - self.xyz_min).prod() / self.num_voxels).pow(1 / 3)
-        print('voxel_size', self.voxel_size)
+        # print('voxel_size', self.voxel_size)
 
         N_samples = int(np.linalg.norm(np.array([voxels_size[0] // 2, voxels_size[1] // 2, voxels_size[2] // 2]) + 1) / self.stepsize) + 1
         self.register_buffer('rng', torch.arange(N_samples)[None].float())
-        print('rng', self.rng)
+        # print('rng', self.rng)
 
     def grid_sampler(self, xyz, grid, align_corners=True, mode='bilinear'):
         '''Wrapper for the interp operation'''

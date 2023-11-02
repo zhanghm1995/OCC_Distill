@@ -8,10 +8,12 @@ Description: Align all the instance mask from all of the objects, including
 foreground and background objects.
 '''
 
-_base_ = ['pretrain-nerf-d-s-flow-inst-mask-256img-24e.py']
+_base_ = ['./pretrain-nerf-d-s-flow-inst-mask-256img-24e.py']
 
 model = dict(
     pretrain_head=dict(
         semantic_align_type='query_flow_all',
+        loss_inter_instance_weight=100.0,
+        loss_inter_channel_weight=10.0,
     )
 )

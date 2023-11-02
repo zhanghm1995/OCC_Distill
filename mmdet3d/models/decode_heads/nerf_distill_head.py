@@ -51,9 +51,18 @@ def cross_modality_contrastive_loss(feat1,
 
 
 def get_inter_channel_loss(feat1, feat2):
+    """Compute the inter channel loss.
+
+    Args:
+        feat1 (Tensor): (B, N, C)
+        feat2 (Tensor): (B, N, C)
+
+    Returns:
+        _type_: _description_
+    """
     # get the inter instance loss
-    feat1 = feat1.permute(1, 0).matmul(feat1) # C, C
-    feat2 = feat2.permute(1, 0).matmul(feat2)
+    feat1 = feat1.permute(0, 2, 1).matmul(feat1) # (B, C, C)
+    feat2 = feat2.permute(0, 2, 1).matmul(feat2)
 
     feat1 = F.normalize(feat1, dim=-1)
     feat2 = F.normalize(feat2, dim=-1)
@@ -65,8 +74,8 @@ def get_inter_channel_loss(feat1, feat2):
 
 
 def get_inter_instance_loss(feat1, feat2):
-    feat1 = feat1.matmul(feat1.permute(1, 0)) # N, N 
-    feat2 = feat2.matmul(feat2.permute(1, 0))
+    feat1 = feat1.matmul(feat1.permute(0, 2, 1)) # B, N, N 
+    feat2 = feat2.matmul(feat2.permute(0, 2, 1)) # B, N, N 
     
     feat1 = F.normalize(feat1, dim=-1)
     feat2 = F.normalize(feat2, dim=-1)
@@ -77,26 +86,48 @@ def get_inter_instance_loss(feat1, feat2):
     return loss_inter_instance
 
 
-def calc_tig_feat_align_loss(feat1, feat2,
-                             use_inter_instance_loss=True,
-                             use_inter_channel_loss=True):
+def compute_tig_feat_align_loss(feat1, feat2,
+                                use_inter_instance_loss=True,
+                                use_inter_channel_loss=True,
+                                loss_inter_instance_weight=1.0,
+                                loss_inter_channel_weight=1.0):
     """Calculate the TiG-BEV feature alignment loss.
 
     Args:
-        feat1 (Tensor): (N, C)
-        feat2 (Tensor): (N, C)
+        feat1 (Tensor): (B, N, C)
+        feat2 (Tensor): (B, N, C)
     """
     loss_dict = dict()
     
     if use_inter_instance_loss:
         loss_inter_instance = get_inter_instance_loss(feat1, feat2)
-        loss_dict['loss_inter_instance'] = loss_inter_instance
+        loss_dict['loss_inter_instance'] = loss_inter_instance * loss_inter_instance_weight
 
     if use_inter_channel_loss:
         loss_inter_channel = get_inter_channel_loss(feat1, feat2)
-        loss_dict['loss_inter_channel'] = loss_inter_channel
+        loss_dict['loss_inter_channel'] = loss_inter_channel * loss_inter_channel_weight
 
-    return loss_dict 
+    return loss_dict
+
+
+def compute_batched_loss_dict_list(loss_dict_list):
+    """Compute the batched loss dict.
+
+    Args:
+        loss_dict (_type_): _description_
+
+    Returns:
+        _type_: _description_
+    """
+    assert isinstance(loss_dict_list, list)
+    assert len(loss_dict_list) > 0
+
+    # compute the batched loss dict
+    batched_loss_dict = dict()
+    for k in loss_dict_list[0].keys():
+        batched_loss_dict[k] = torch.stack([loss_dict[k] for loss_dict in loss_dict_list], 
+                                           dim=0).mean()
+    return batched_loss_dict
 
 
 @HEADS.register_module()
@@ -331,11 +362,11 @@ class NeRFOccPretrainHead(BaseModule):
     def __init__(self,
                  use_depth_align=False,
                  use_semantic_align=True,
-                 use_occ_logits_align=False,
-                 depth_align_loss=dict(
-                    type='KnowledgeDistillationKLDivLoss', 
-                    loss_weight=1.0),
+                 use_pointwise_align=True,
+                 loss_pointwise_align_weight=1.0,
                  loss_semantic_align_weight=1.0,
+                 loss_inter_instance_weight=1.0,
+                 loss_inter_channel_weight=1.0,
                  semantic_align_type='query_fixed', # kl | contrastive
                  occ_logits_align_loss=None,
                  detach_target=False,
@@ -345,19 +376,58 @@ class NeRFOccPretrainHead(BaseModule):
         super(NeRFOccPretrainHead, self).__init__(init_cfg=init_cfg)
 
         self.use_depth_align = use_depth_align
+
+        self.use_pointwise_align = use_pointwise_align
+        self.loss_pointwise_align_weight = loss_pointwise_align_weight
+
         self.use_semantic_align = use_semantic_align
         self.loss_semantic_align_weight = loss_semantic_align_weight
+        self.loss_inter_instance_weight = loss_inter_instance_weight
+        self.loss_inter_channel_weight = loss_inter_channel_weight
         self.detach_target = detach_target
         self.semantic_align_type = semantic_align_type
 
-        self.compute_depth_align_loss = build_loss(depth_align_loss)
+    def loss_with_render_mask(self,
+                              input_dict: Dict,
+                              seq_len=2,
+                              rand_view_idx=None,
+                              render_mask=None,
+                              **kwargs):
+        """Compute the loss with the render mask.
+        """
+        losses = dict()
 
-        self.use_occ_logits_align = use_occ_logits_align
-        if use_occ_logits_align:
-            assert occ_logits_align_loss is not None
-            self.compute_occ_logits_align_loss = build_loss(
-                occ_logits_align_loss)
-        
+        if self.use_pointwise_align:
+            assert 'render_semantic' in input_dict
+            assert 'sample_pts_pad' in kwargs
+            
+            sample_pts = kwargs['sample_pts_pad']  # (seq*b, num_cam, N, 2)
+
+            semantic_pred = input_dict['render_semantic']  # (N, C)
+            render_mask = input_dict['render_mask']
+
+            seq = 2
+            render_mask = rearrange(render_mask,
+                                    '(seq b) num_cam h w -> seq b num_cam h w',
+                                    seq=seq)
+            
+            render_mask1 = render_mask[0]  # (b, num_cam, h, w)
+            render_mask2 = render_mask[1]  # (b, num_cam, h, w)
+            assert (render_mask1).sum() == (render_mask2).sum()
+
+            num_frame_pixels = render_mask1.sum()
+
+            semantic_pred1 = semantic_pred[:num_frame_pixels]
+            semantic_pred2 = semantic_pred[num_frame_pixels:]
+
+            ## compute the loss
+            loss_semantic_align_pointwise = F.mse_loss(
+                semantic_pred1, semantic_pred2)
+
+            losses['loss_pointwise_align'] = \
+                loss_semantic_align_pointwise * self.loss_pointwise_align_weight
+        return losses
+    
     def loss(self, 
              input_dict: Dict,
              seq_len=2,
@@ -372,6 +442,26 @@ class NeRFOccPretrainHead(BaseModule):
             loss_depth_align = self.compute_depth_align_loss(
                 render_weights_stu, render_weights_tea)
             losses['loss_depth_align'] = loss_depth_align
+        
+        if self.use_pointwise_align:
+            assert 'render_semantic' in input_dict
+            assert 'sample_pts_pad' in kwargs
+
+            semantic_pred = input_dict['render_semantic']  # (b*seq, num_cam, c, h, w)
+
+            sample_pts = kwargs['sample_pts_pad']  # (b*seq, num_cam, N, 2)
+            if rand_view_idx is not None:
+                sample_pts = sample_pts[:, rand_view_idx]
+            
+            sample_pts = rearrange(sample_pts,
+                                    '(b seq) num_cam N uv -> seq b num_cam N uv',
+                                    seq=seq_len)
+            
+            loss_pointwise_align = self.compute_pointwise_loss_with_flow(
+                semantic_pred[0], semantic_pred[1],
+                sample_pts[0], sample_pts[1],
+                loss_weight=self.loss_pointwise_align_weight)
+            losses['loss_pointwise_align'] = loss_pointwise_align
         
         if self.use_semantic_align:
             assert 'render_semantic' in input_dict
@@ -422,13 +512,7 @@ class NeRFOccPretrainHead(BaseModule):
                                        '(b seq) num_cam N uv -> seq b num_cam N uv',
                                        seq=seq_len)
                 
-                loss_semantic_align = self.compute_pointwise_loss_with_flow(
-                    semantic_pred[0], semantic_pred[1],
-                    instance_mask[0], instance_mask[1],
-                    sample_pts[0], sample_pts[1],
-                    loss_weight=self.loss_semantic_align_weight)
-                
-                loss_semantic_align_contrastive = self.compute_semantic_contrastive_loss_with_flow(
+                loss_semantic_contrast_dict = self.compute_semantic_contrast_loss_with_flow(
                     semantic_pred[0], semantic_pred[1],
                     instance_mask[0], instance_mask[1],
                     sample_pts[0], sample_pts[1],
@@ -437,7 +521,7 @@ class NeRFOccPretrainHead(BaseModule):
             else:
                 raise NotImplementedError()
             
-            losses['loss_semantic_align'] = loss_semantic_align
+            losses.update(loss_semantic_contrast_dict)
         
         return losses
     
@@ -512,10 +596,8 @@ class NeRFOccPretrainHead(BaseModule):
     def compute_pointwise_loss_with_flow(self,
                                          render_semantic1,
                                          render_semantic2,
-                                         instance_mask1=None,
-                                         instance_mask2=None,
-                                         sample_pts1=None,
-                                         sample_pts2=None,
+                                         sample_pts1,
+                                         sample_pts2,
                                          loss_weight=1.0):
         """Compute the rendered semantics pointwise loss with the corresponding
         sample points coordinates.
@@ -558,15 +640,15 @@ class NeRFOccPretrainHead(BaseModule):
 
         return loss_semantic_align_pointwise * loss_weight
 
-    def compute_semantic_contrastive_loss_with_flow(self,
-                                                    render_semantic_1,
-                                                    render_semantic_2,
-                                                    instance_mask_1,
-                                                    instance_mask_2,
-                                                    sample_pts_1,
-                                                    sample_pts_2,
-                                                    loss_weight=1.0,
-                                                    **kwargs):
+    def compute_semantic_contrast_loss_with_flow(self,
+                                                 render_semantic_1,
+                                                 render_semantic_2,
+                                                 instance_mask_1,
+                                                 instance_mask_2,
+                                                 sample_pts_1,
+                                                 sample_pts_2,
+                                                 loss_weight=1.0,
+                                                 **kwargs):
         """_summary_
 
         Args:
@@ -601,8 +683,11 @@ class NeRFOccPretrainHead(BaseModule):
                                           dim=2)
         
         VISUALIZE = False
-        loss_semantic_temporal_align = 0.0
+
+        batched_loss = []
         for i in range(bs):
+            all_camera_grouped_feats_1 = []
+            all_camera_grouped_feats_2 = []
             for j in range(num_cam):
                 curr_instance_map_1 = instance_mask_1[i, j].reshape(h, w)
                 curr_instance_map_2 = instance_mask_2[i, j].reshape(h, w)
@@ -687,11 +772,22 @@ class NeRFOccPretrainHead(BaseModule):
                 # obtain the grouped semantic features according to the instance ids
                 curr_grouped_feats_1 = grouped_semantic_1[i, j, instance_id_list_1]  # (N, C)
                 curr_grouped_feats_2 = grouped_semantic_2[i, j, instance_id_list_2]
-                loss_semantic_align = cross_modality_contrastive_loss(
-                    curr_grouped_feats_1, curr_grouped_feats_2)
-                loss_semantic_temporal_align += loss_semantic_align
+                
+                all_camera_grouped_feats_1.append(curr_grouped_feats_1)
+                all_camera_grouped_feats_2.append(curr_grouped_feats_2)
+            
+            all_camera_grouped_feats_1 = torch.concat(all_camera_grouped_feats_1, dim=0)[None]
+            all_camera_grouped_feats_2 = torch.concat(all_camera_grouped_feats_2, dim=0)[None]
+            curr_batch_loss = compute_tig_feat_align_loss(
+                all_camera_grouped_feats_1, all_camera_grouped_feats_2,
+                loss_inter_instance_weight=self.loss_inter_instance_weight,
+                loss_inter_channel_weight=self.loss_inter_channel_weight
+                )
+            batched_loss.append(curr_batch_loss)
+
+        loss_semantic_temporal_align = compute_batched_loss_dict_list(batched_loss)
         
-        return loss_semantic_temporal_align * loss_weight
+        return loss_semantic_temporal_align
 
     def select_correspondences(self, 
                                instance_map1,

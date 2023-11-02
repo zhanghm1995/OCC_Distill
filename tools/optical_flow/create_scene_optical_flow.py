@@ -816,6 +816,11 @@ def main_v2(anno_file):
 
 
 def main_all_objects(anno_file):
+    """Process all objects including static and movable objects.
+
+    Args:
+        anno_file (str): the pickle file path.
+    """
 
     with open(anno_file, "rb") as fp:
         dataset = pickle.load(fp)
