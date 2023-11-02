@@ -306,16 +306,17 @@ class NeRFDecoderHead(nn.Module):
                 semantic = self.grid_sampler(mask_rays_pts, semantic_recon)
                 B, N = rays_pts.shape[:2]
                 semantic_cache = torch.zeros((B, N, semantic_recon.shape[0])).to(rays_pts.device)
-                semantic_cache[~mask_outbbox] = semantic  # 473088, 287, 3
+                semantic_cache[~mask_outbbox] = semantic
 
                 semantic_marched = segment_coo(
-                    src=(weights * semantic_cache),
+                    src=(weights.reshape(probs.shape).unsqueeze(-1) * semantic_cache).reshape((-1, semantic.shape[-1])),
                     index=ray_id,
                     out=torch.zeros([len(rays_pts), semantic.shape[-1]]).to(weights.device),
                     reduce='sum')
             else:
                 semantic_marched = depth
-            rgb_marched = depth
+            
+            rgb_marched = depth  # TODO: add rgb_marched
 
         elif self.render_type == 'density':
             # torch.cuda.synchronize()
@@ -662,83 +663,3 @@ class NeRFDecoderHead(nn.Module):
                 np.save(save_depth_path, rendered_depth)
         else:
             plt.show()
-
-if __name__ == '__main__':
-    import time
-    from easydict import EasyDict
-
-    rays_o = torch.load('/home/huawei/yanxu/codes/SimpleOccupancy/networks/input_samples/rays_o.pth').cuda()
-    rays_d = torch.load('/home/huawei/yanxu/codes/SimpleOccupancy/networks/input_samples/rays_d.pth').cuda()
-    intricics = torch.load("/home/huawei/yanxu/codes/SimpleOccupancy/networks/input_samples/('K_render', 0, 0).pth").cuda().unsqueeze(0)
-    pose_spatial = torch.load('/home/huawei/yanxu/codes/SimpleOccupancy/networks/input_samples/pose_spatial.pth').cuda().unsqueeze(0)
-    gt_semantics = torch.load('/home/huawei/yanxu/codes/SimpleOccupancy/networks/input_samples/gt_semantics.pth').cuda()
-    print('rays_o', rays_o.shape)  # torch.Size([1, 6, 224, 352, 3])
-    print('rays_d', rays_o.shape)  # torch.Size([1, 6, 224, 352, 3])
-    print('intricics', intricics.shape)  # torch.Size([1, 6, 4, 4])
-    print('pose_spatial', pose_spatial.shape)  # torch.Size([1, 6, 4, 4])
-    print('gt_semantics', gt_semantics.shape)
-    density_prob = (gt_semantics.unsqueeze(0).unsqueeze(0) != 17).float()
-    density_prob[density_prob == 0] = -10 # scaling to avoid 0 in alphas
-    density_prob[density_prob == 1] = 10
-    print('density_prob', density_prob.shape)  # torch.Size([1, 1, 200, 200, 16])
-
-    config = {
-        'real_size': [-40, 40, -40, 40, -1, 5.4],
-        'voxels_size': [200, 200, 16],
-        'stepsize': 1,
-        # 'mode': 'nearest',
-        'mode': 'bilinear',
-        'render_type': 'prob',
-        # 'render_type': 'density',
-        'render_w': 352,
-        'render_h': 224,
-        'min_depth': 0.1,
-        'max_depth': 100.0,
-        'loss_nerf_weight': 1,
-        'depth_loss_type': 'l1',
-        'variance_focus': 0.85,
-        'img_recon_head': False,
-        'semantic_head': False,
-        'semantic_dim': 17,
-    }
-    config = EasyDict(config)
-
-    # test batchify
-    density_prob, rays_o, rays_d = density_prob.repeat(2, 1, 1, 1, 1), rays_o.repeat(2, 1, 1, 1, 1), rays_d.repeat(2, 1, 1, 1, 1)
-    intricics, pose_spatial = intricics.repeat(2, 1, 1, 1), pose_spatial.repeat(2, 1, 1, 1)
-
-    # nerf loss
-
-    nerf = NeRFDecoder(
-        real_size=config.real_size,
-        stepsize=config.stepsize,
-        voxels_size=config.voxels_size,
-        mode=config.mode,
-        render_type=config.render_type,
-        render_size=(config.render_h, config.render_w),
-        depth_range=(config.min_depth, config.max_depth),
-        loss_nerf_weight=config.loss_nerf_weight,
-        depth_loss_type=config.depth_loss_type,
-        variance_focus=config.variance_focus,
-        img_recon_head=config.img_recon_head,
-        semantic_head=config.semantic_head,
-        semantic_dim=config.semantic_dim,
-    ).cuda()
-
-    torch.cuda.synchronize()
-    start = time.time()
-    depth, _, _ = nerf(
-        density_prob,
-        density_prob.tile(1, 3, 1, 1, 1),
-        density_prob.tile(1, 17, 1, 1, 1),
-        intricics, pose_spatial)
-    torch.cuda.synchronize()
-    end = time.time()
-    print("inference time:", end - start)
-
-    print('depth', depth.shape, depth.max(), depth.min())
-
-    images = torch.load("/home/huawei/yanxu/codes/SimpleOccupancy/networks/input_samples/('color', 0, 0).pth").cpu().numpy()
-    print('images', images.shape)
-
-    nerf.visualize_image_depth_pair(images, depth[0], depth[0])

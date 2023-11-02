@@ -438,8 +438,8 @@ class BEVStereo4DOCCTemporalNeRFPretrain(BEVStereo4DOCCNeRFRretrain):
         
         super(BEVStereo4DOCCTemporalNeRFPretrain, self).__init__(**kwargs)
 
-        self.loss_compare = build_loss(loss_compare)
-        self.pretrain_head = builder.build_head(pretrain_head)
+        self.loss_compare = build_loss(loss_compare) if loss_compare else None
+        self.pretrain_head = builder.build_head(pretrain_head) if pretrain_head else None
 
     def simple_test(self,
                     points,
@@ -546,6 +546,8 @@ class BEVStereo4DOCCTemporalNeRFPretrain(BEVStereo4DOCCNeRFRretrain):
                 entry = entry.view(-1, *entry.shape[2:])
                 img_inputs_new.append(entry)
             img_inputs = img_inputs_new
+
+            kwargs = self.reshape_kwargs(kwargs)
         
         img_feats, pts_feats, depth = self.extract_feat(
             points, img=img_inputs, img_metas=img_metas, **kwargs)
@@ -554,8 +556,6 @@ class BEVStereo4DOCCTemporalNeRFPretrain(BEVStereo4DOCCNeRFRretrain):
         occ_pred = self.final_conv(img_feats[0]).permute(0, 4, 3, 2, 1)  # to (b, 200, 200, 16, c)
         if self.use_predicter:
             occ_pred = self.predicter(occ_pred)
-
-        kwargs = self.reshape_kwargs(kwargs)
 
         gt_depth = kwargs['gt_depth']
         intricics = kwargs['intricics']
@@ -572,38 +572,17 @@ class BEVStereo4DOCCTemporalNeRFPretrain(BEVStereo4DOCCNeRFRretrain):
             occ_pred = occ_pred[..., :-3]
 
         # NeRF loss
-        VISUALIZE = False
+        VISUALIZE = True
         if VISUALIZE:  # DEBUG ONLY!
-            density_prob = kwargs['voxel_semantics'].unsqueeze(1)
-            # img_semantic = kwargs['img_semantic']
-            density_prob = density_prob != 17
-            density_prob = density_prob.float()
-            density_prob[density_prob == 0] = -10  # scaling to avoid 0 in alphas
-            density_prob[density_prob == 1] = 10
-            batch_size = density_prob.shape[0]
-            density_prob_flip = self.inverse_flip_aug(density_prob, flip_dx, flip_dy)
-            print(density_prob_flip.shape)
-
-            # nerf decoder
-            render_depth, _, _ = self.NeRFDecoder(
-                density_prob_flip,
-                density_prob_flip.tile(1, 3, 1, 1, 1),
-                density_prob_flip.tile(1, self.NeRFDecoder.semantic_dim, 1, 1, 1),
-                intricics, pose_spatial, True
-            )
-            print('density_prob', density_prob.shape)  # [1, 1, 200, 200, 16]
-            print('render_depth', render_depth.shape, render_depth.max(), render_depth.min())  # [1, 6, 224, 352]
-            print('gt_depth', gt_depth.shape, gt_depth.max(), gt_depth.min())  # [1, 6, 384, 704]
-            current_frame_img = render_img_gt.view(batch_size, 
-                                                   6, 
-                                                   self.num_frame, 
-                                                   -1, 
-                                                   render_img_gt.shape[-2], 
-                                                   render_img_gt.shape[-1])[0, :, 0].cpu().numpy()
-            print(current_frame_img.shape)
-            self.NeRFDecoder.visualize_image_depth_pair(current_frame_img, 
-                                                        render_gt_depth[0], 
-                                                        render_depth[0])
+            from .bevdet_occ_nerf_S_visualizer import NeRFVisualizer
+            visualizer = NeRFVisualizer()
+            visualizer.visualize_gt_occ(self.NeRFDecoder, 
+                                        self.num_frame,
+                                        kwargs['voxel_semantics'],
+                                        render_img_gt, 
+                                        flip_dx, flip_dy,
+                                        intricics, pose_spatial,
+                                        save_dir="./results/cvpr_visualization/dvgo_render")
             exit()
 
         occ_pred = occ_pred.permute(0, 4, 1, 2, 3)  # to (B, c, 200, 200, 16)

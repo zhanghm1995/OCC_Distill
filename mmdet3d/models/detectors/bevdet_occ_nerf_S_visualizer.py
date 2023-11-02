@@ -10,7 +10,7 @@ Description: Just for visualization.
 import numpy as np
 import torch
 import torch.nn.functional as F
-
+from einops import rearrange, repeat
 from mmdet.models import DETECTORS
 from mmdet.models.builder import build_loss
 from mmcv.cnn.bricks.conv_module import ConvModule
@@ -160,11 +160,11 @@ class NeRFVisualizer(object):
             nerf_head (_type_): _description_
             num_frame (int): _description_
             voxel_semantics (Tensor): (b, 200, 200, 16)
-            render_img_gt (_type_): _description_
-            flip_dx (_type_): _description_
-            flip_dy (_type_): _description_
-            intricics (_type_): _description_
-            pose_spatial (_type_): _description_
+            render_img_gt (Tensor): [b, num_cam*num_frame, 3, h, w]
+            flip_dx (Tensor): _description_
+            flip_dy (Tensor): 
+            intricics (Tensor): (b, num_cam, 4, 4)
+            pose_spatial (Tensor): (b, num_cam, 4, 4)
         """
         # to (b, 1, 200, 200, 16)
         voxel_semantics = voxel_semantics.unsqueeze(1)
@@ -174,34 +174,34 @@ class NeRFVisualizer(object):
         density_prob[density_prob == 0] = -10  # scaling to avoid 0 in alphas
         density_prob[density_prob == 1] = 10
         batch_size = density_prob.shape[0]
-        density_prob_flip = inverse_flip_aug(density_prob, flip_dx, flip_dy)
-        print(density_prob_flip.shape)
+        density_prob_flip = inverse_flip_aug(density_prob, flip_dx, flip_dy)  # torch.Size([b, 1, 200, 200, 16])
 
         # to (b, 1, 200, 200, 16, 3)
         sem_color = self.NUSCENSE_LIDARSEG_PALETTE[voxel_semantics.long()].cuda()
-        sem_color_flip = inverse_flip_aug(
-            sem_color, flip_dx, flip_dy).permute(0, 1, 5, 2, 3, 4)[:, 0]
-        print(sem_color.shape, sem_color_flip.shape)
+        sem_color_flip = inverse_flip_aug(sem_color, flip_dx, flip_dy)
+        # to torch.Size([b, 3, 200, 200, 16])
+        sem_color_flip = rearrange(sem_color_flip, 'b c h w d Dim3 -> b c Dim3 h w d')[:, 0]
 
         # nerf decoder
         # NOTE: Here we use the RGB rendering to render the semantic map
-        render_depth, render_color, _ = nerf_head(
+        render_depth, render_color, render_semantic = nerf_head(
             density_prob_flip,
             sem_color_flip,
-            density_prob_flip.tile(1, nerf_head.semantic_dim, 1, 1, 1),
+            sem_color_flip,
             intricics, pose_spatial, True, force_render_rgb=True)
         
-        print('density_prob', density_prob.shape)  # [1, 1, 200, 200, 16]
+        render_color = rearrange(render_color, 'b num_cam c h w -> b num_cam h w c')[0]
+        render_semantic = rearrange(render_semantic, 'b num_cam c h w -> b num_cam h w c')[0]
+
         print('render_depth', render_depth.shape, render_depth.max(), render_depth.min())  # [1, 6, 224, 352]
         current_frame_img = render_img_gt.view(
             batch_size, 6, num_frame, -1, 
             render_img_gt.shape[-2], render_img_gt.shape[-1])[0, :, 0].cpu().numpy()
-        print(current_frame_img.shape)
 
         ## visualize the depth map and semantic map
         nerf_head.visualize_image_semantic_depth_pair(
             current_frame_img, 
-            render_color.permute(0, 1, 3, 4, 2)[0], 
+            render_semantic, 
             render_depth[0],
             save=True,
             save_dir=save_dir)
