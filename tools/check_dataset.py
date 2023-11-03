@@ -45,7 +45,8 @@ def check_sam_mask_data():
 def convert_json_sam_mask_to_npz():
     import pycocotools.mask as maskUtils
 
-    anno_file = "data/nuscenes/bevdetv3-inst-nuscenes_infos_train.pkl"
+    # anno_file = "data/nuscenes/bevdetv3-inst-nuscenes_infos_train.pkl"
+    anno_file = "data/nuscenes/bevdetv3-inst-nuscenes_infos_val.pkl"
     # 1) load the dataset pickle file
     with open(anno_file, "rb") as fp:
         dataset = pickle.load(fp)
@@ -54,7 +55,7 @@ def convert_json_sam_mask_to_npz():
     data_infos = list(sorted(data_infos, key=lambda e: e['timestamp']))
     print(f"Total length of data infos: {len(data_infos)}")
 
-    range1, range2 = 13000, 14000
+    range1, range2 = 5000, 6020
     data_infos = data_infos[range1:range2]
     print(f"Convert the data from {range1} to {range2}")
 
@@ -63,7 +64,7 @@ def convert_json_sam_mask_to_npz():
     
     instance_mask_dir = 'data/nuscenes/sam_mask_json'
 
-    save_root = "data/nuscenes/sam_mask_npz"
+    save_root = "data/nuscenes/sam_mask_npz_val"
     os.makedirs(save_root, exist_ok=True)
 
     MAX_NUM_INSTANCES = 254
@@ -117,6 +118,11 @@ def load_data():
     file_path = "data/nuscenes/sam_mask_npz/0a447061deec491692a90cfd61c59673.npz"
     data = np.load(file_path)
     print(data.files)
+    data = data['arr_0'].astype(np.int64) - 1
+
+    data = torch.from_numpy(data)
+    print(data.dtype)
+    # print(data.shape, data.dtype, np.unique(data))
     end = time.time()
     print("Data time:", end - start)
 
@@ -158,6 +164,6 @@ def check_nuscene_flow_data():
 
 
 if __name__ == "__main__":
-    # convert_json_sam_mask_to_npz()
+    convert_json_sam_mask_to_npz()
 
-    load_data()
+    # load_data()

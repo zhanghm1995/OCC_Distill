@@ -16,6 +16,29 @@ from nuscenes import NuScenes
 from nuscenes.utils.geometry_utils import BoxVisibility, view_points
 
 
+def load_pickle():
+    """Load the nuscenes dataset pickle file, and explore the
+    infos contents.
+
+    Args:
+        pickle_file_path (_type_): _description_
+    """
+    pickle_file_path = "data/nuscenes/bevdetv3-lidarseg-nuscenes_infos_train.pkl"
+
+    with open(pickle_file_path, "rb") as fp:
+        dataset = pickle.load(fp)
+    
+    print(type(dataset))
+    print(dataset.keys())
+    
+    data_infos = dataset['infos']
+    print(len(data_infos))
+
+    idx = 100
+    info = data_infos[idx]
+    print(info.keys())
+
+
 def create_instance_pickle():
     version = 'v1.0-trainval'
     dataroot = 'data/nuscenes/'
@@ -86,4 +109,6 @@ def create_instance_pickle_with_corners():
 
 
 if __name__ == '__main__':
+    load_pickle()
+    exit()
     create_instance_pickle_with_corners()

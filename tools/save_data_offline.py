@@ -13,6 +13,9 @@ import os
 import os.path as osp
 import numpy as np
 from tqdm import tqdm
+import matplotlib.pyplot as plt
+from copy import deepcopy
+import cv2
 
 
 def load_pickle(pickle_file_path):
@@ -232,7 +235,165 @@ def save_all_cam_cat_images(anno_file, save_root=None):
 
             cam_img_path = osp.join(save_root, f"{idx:06d}.jpg")
             result.save(cam_img_path)
+
+
+def get_real_sample_points(sample_pts_pad1, sample_pts_pad2, target_size=(900, 1600)):
+    # we generate these sample points in the 900x1600 image, in this case,
+    origin_h, origin_w = 900, 1600
+    height, width = target_size
+    scale_h, scale_w = height / origin_h, width / origin_w
+
+    assert sample_pts_pad1.shape[0] == sample_pts_pad1.shape[0]
+    num_cam = sample_pts_pad1.shape[0]
+
+    all_cam_sample_pts1, all_cam_sample_pts2 = [], []
+    for i in range(num_cam):
+        num_valid_pts = int(sample_pts_pad1[i, -1, 0])
+        sample_pts1 = sample_pts_pad1[i, :num_valid_pts]
+        sample_pts2 = sample_pts_pad2[i, :num_valid_pts]
+
+        sample_pts1 *= np.array([scale_w, scale_h])
+        sample_pts2 *= np.array([scale_w, scale_h])
         
+        sample_pts1 = sample_pts1.astype(np.int32)
+        sample_pts2 = sample_pts2.astype(np.int32)
+
+        all_cam_sample_pts1.append(sample_pts1)
+        all_cam_sample_pts2.append(sample_pts2)
+    return all_cam_sample_pts1, all_cam_sample_pts2
+
+
+def load_images(cam_infos, choose_cam_names, img_size):
+    cam_imgs = []
+    for cam_name in choose_cam_names:
+        cam_data = cam_infos[cam_name]
+        filename = cam_data['data_path']
+        cam_img = cv2.imread(filename)
+        cam_img_resized = cv2.resize(cam_img, img_size)
+        cam_imgs.append(cam_img_resized)
+    return cam_imgs
+
+
+def combine_multi_cam_images(cam_imgs, cam_img_size):
+    """_summary_
+
+    Args:
+        cam_imgs (List): each image is PIL.Image
+        cam_img_size (_type_): (w, h)
+
+    Returns:
+        _type_: _description_
+    """
+    spacing = 10
+    cam_w, cam_h = cam_img_size
+    result_w = cam_w * 3 + 2 * spacing
+    result_h = cam_h * 2 + 1 * spacing
+    result = Image.new(cam_imgs[0].mode, (result_w, result_h), (0, 0, 0))
+
+    result.paste(cam_imgs[1], box=(1*cam_w+1*spacing, 0))
+    result.paste(cam_imgs[2], box=(2*cam_w+2*spacing, 0))
+    result.paste(cam_imgs[0], box=(0, 0))
+    result.paste(cam_imgs[4], box=(1*cam_w+1*spacing, 1*cam_h+1*spacing))
+    result.paste(cam_imgs[3], box=(0, 1*cam_h+1*spacing))
+    result.paste(cam_imgs[5], box=(2*cam_w+2*spacing, 1*cam_h+1*spacing))
+    return result
+
+
+def save_point_flow_cat_images(save_root):
+    anno_file = "data/nuscenes/bevdetv3-lidarseg-nuscenes_infos_val.pkl"
+
+    data_root = "./data/nuscenes/nuscenes_scene_sequence_npz"
+
+    with open(anno_file, "rb") as fp:
+        dataset = pickle.load(fp)
+    
+    data_infos = dataset['infos']
+
+    ## sort the data infos according to the timestamp to keep the same with BEVDet dataloader.
+    data_infos = list(sorted(data_infos, key=lambda e: e['timestamp']))
+    
+    cam_names = [
+        'CAM_FRONT_LEFT', 'CAM_FRONT', 'CAM_FRONT_RIGHT', 'CAM_BACK_LEFT',
+        'CAM_BACK', 'CAM_BACK_RIGHT'
+    ]
+
+    cam_img_size = [480, 270]  # [w, h]
+    for idx, info in tqdm(enumerate(data_infos), total=len(data_infos)):
+        cam_infos = info['cams']
+
+        cam_imgs1 = load_images(cam_infos, cam_names, cam_img_size)
+
+        scene_token = info['scene_token']
+        sample_token = info['token']
+
+        # get the next frame
+        next_idx = min(idx + 1, len(data_infos) - 1)
+        next_info = data_infos[next_idx]
+        next_scene_token = next_info['scene_token']
+        next_sample_token = next_info['token']
+
+        cam_imgs2 = load_images(next_info['cams'], cam_names, cam_img_size)
+        
+        if scene_token != next_scene_token:
+            vis_cam_imgs1 = deepcopy(cam_imgs1)
+            vis_cam_imgs2 = deepcopy(cam_imgs2)
+        else:
+            scene_flow_file = osp.join(data_root,
+                                       scene_token, 
+                                       f"{sample_token}_{next_sample_token}.npz")
+            scene_flow_dict = np.load(scene_flow_file)
+            # (n_cam, n_points, 2)
+            sample_pts_pad1 = scene_flow_dict['coord1']
+            sample_pts_pad2 = scene_flow_dict['coord2']
+
+            all_cams_sample_pts1, all_cams_sample_pts2 = get_real_sample_points(
+                sample_pts_pad1, sample_pts_pad2, target_size=(cam_img_size[1], cam_img_size[0]))
+
+            ## Draw points on the image
+            vis_cam_imgs1 = []
+            vis_cam_imgs2 = []
+            for i in range(len(cam_names)):
+                img1 = cam_imgs1[i]
+                img2 = cam_imgs2[i]
+
+                samplet_pts1 = all_cams_sample_pts1[i]
+                samplet_pts2 = all_cams_sample_pts2[i]
+                center = np.median(samplet_pts1, axis=0)
+                set_max = range(128)
+                colors = {m: i for i, m in enumerate(set_max)}
+                colors = {m: (255 * np.array(plt.cm.hsv(i/float(len(colors))))[:3][::-1]).astype(np.int32)
+                            for m, i in colors.items()}
+                for k in range(samplet_pts1.shape[0]):
+                    pt1 = (int(samplet_pts1[k, 0]), int(samplet_pts1[k, 1]))
+                    pt2 = (int(samplet_pts2[k, 0]), int(samplet_pts2[k, 1]))
+
+                    coord_angle = np.arctan2(pt1[1] - center[1], pt1[0] - center[0])
+                    corr_color = np.int32(64 * coord_angle / np.pi) % 128
+                    color = tuple(colors[corr_color].tolist())
+                    
+                    cv2.circle(img1, pt1, 1, color, -1, cv2.LINE_AA)
+                    cv2.circle(img2, pt2, 1, color, -1, cv2.LINE_AA)
+                
+                img1 = Image.fromarray(img1)
+                img2 = Image.fromarray(img2)
+                vis_cam_imgs1.append(img1)
+                vis_cam_imgs2.append(img2)
+
+        ## start saving
+        result1 = combine_multi_cam_images(vis_cam_imgs1, cam_img_size)
+        result2 = combine_multi_cam_images(vis_cam_imgs2, cam_img_size)
+
+        if save_root is not None:
+            result1 = np.array(result1)
+            result2 = np.array(result2)
+
+            blank_bar = np.ones((10, result1.shape[1], 3), dtype=np.uint8) * 255
+            result = np.concatenate([result1, blank_bar, result2], axis=0).astype(np.uint8)
+
+            # create the camera image directory
+            os.makedirs(save_root, exist_ok=True)
+            cam_img_path = osp.join(save_root, f"{idx:06d}.jpg")
+            cv2.imwrite(cam_img_path, result)
 
 
 def read_sam_mask():
@@ -315,6 +476,9 @@ def save_scene_sequence_image(anno_file):
 
 
 if __name__ == "__main__":
+    save_point_flow_cat_images(save_root="./results/cvpr_flow_points_cat")
+    exit(0)
+
     pickle_path = "data/nuscenes/bevdetv3-lidarseg-nuscenes_infos_val.pkl"
     save_scene_sequence_image(pickle_path)
     exit(0)
