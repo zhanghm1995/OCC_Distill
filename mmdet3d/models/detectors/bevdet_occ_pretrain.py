@@ -1050,6 +1050,10 @@ class BEVStereo4DOCCTemporalNeRFPretrainV3(BEVStereo4DOCCNeRFRretrain):
         Returns:
             dict: Losses of different branches.
         """
+        # import time
+        # torch.cuda.synchronize()
+        # start = time.time()
+        
         if img_inputs[0].dim() == 6:
             img_inputs_new = []
             for entry in img_inputs:
@@ -1064,6 +1068,9 @@ class BEVStereo4DOCCTemporalNeRFPretrainV3(BEVStereo4DOCCNeRFRretrain):
         
         # occupancy prediction
         voxel_feats = self.final_conv(img_feats[0]).permute(0, 4, 3, 2, 1)  # to (b, 200, 200, 16, c)
+
+        # end = time.time()
+        # print("Forward time:", end - start)
         
         losses = dict()
         if self.use_lss_depth_loss:
