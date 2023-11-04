@@ -391,43 +391,172 @@ class NeRFOccPretrainHead(BaseModule):
                               input_dict: Dict,
                               seq_len=2,
                               rand_view_idx=None,
-                              render_mask=None,
                               **kwargs):
         """Compute the loss with the render mask.
         """
         losses = dict()
 
+        assert 'render_semantic' in input_dict
+        assert 'sample_pts_pad' in kwargs
+
+        semantic_pred = input_dict['render_semantic']  # (N, C)
+        render_mask = input_dict['render_mask']  # (seq*b num_cam h w)
+
+        seq = 2
+        render_mask = rearrange(render_mask,
+                                '(seq b) num_cam h w -> seq b num_cam h w',
+                                seq=seq)
+        
+        render_mask1 = render_mask[0]  # (b, num_cam, h, w)
+        render_mask2 = render_mask[1]  # (b, num_cam, h, w)
+        assert (render_mask1).sum() == (render_mask2).sum()
+
+        num_frame_pixels = render_mask1.sum()  # the number of rendered rays in the frame
+
+        semantic_pred1 = semantic_pred[:num_frame_pixels]
+        semantic_pred2 = semantic_pred[num_frame_pixels:]
+
         if self.use_pointwise_align:
-            assert 'render_semantic' in input_dict
-            assert 'sample_pts_pad' in kwargs
-            
-            sample_pts = kwargs['sample_pts_pad']  # (seq*b, num_cam, N, 2)
-
-            semantic_pred = input_dict['render_semantic']  # (N, C)
-            render_mask = input_dict['render_mask']
-
-            seq = 2
-            render_mask = rearrange(render_mask,
-                                    '(seq b) num_cam h w -> seq b num_cam h w',
-                                    seq=seq)
-            
-            render_mask1 = render_mask[0]  # (b, num_cam, h, w)
-            render_mask2 = render_mask[1]  # (b, num_cam, h, w)
-            assert (render_mask1).sum() == (render_mask2).sum()
-
-            num_frame_pixels = render_mask1.sum()
-
-            semantic_pred1 = semantic_pred[:num_frame_pixels]
-            semantic_pred2 = semantic_pred[num_frame_pixels:]
-
-            ## compute the loss
+            ## compute the temporal pointwise align loss
             loss_semantic_align_pointwise = F.mse_loss(
                 semantic_pred1, semantic_pred2)
 
             losses['loss_pointwise_align'] = \
                 loss_semantic_align_pointwise * self.loss_pointwise_align_weight
+            
+        if self.use_semantic_align:
+            ## Here we adapt the flow info to align the temporal
+            # instance masks
+            assert 'instance_masks' in kwargs
+
+            instance_mask = kwargs['instance_masks']  # (seq*b, num_cam, h, w)
+            sample_pts = kwargs['sample_pts_pad']  # (seq*b, num_cam, N, 2)
+            if rand_view_idx is not None:
+                instance_mask = instance_mask[:, rand_view_idx]
+                sample_pts = sample_pts[:, rand_view_idx]
+            
+            instance_mask = rearrange(instance_mask,
+                                      '(seq b) num_cam h w -> seq b num_cam h w',
+                                      seq=seq_len)
+            sample_pts = rearrange(sample_pts,
+                                    '(seq b) num_cam N uv -> seq b num_cam N uv',
+                                    seq=seq_len)
+            
+            instance_mask1 = instance_mask[0]  # (b, num_cam, h, w)
+            instance_mask2 = instance_mask[1]  # (b, num_cam, h, w)
+
+            sample_pts1 = sample_pts[0]  # (b, num_cam, N, 2)
+            sample_pts2 = sample_pts[1]  # (b, num_cam, N, 2)
+
+            bs, num_cam, h, w = instance_mask1.shape
+            start, end = 0, 0
+
+            batched_loss = []
+            for i in range(bs):
+                all_camera_grouped_feats_1 = []
+                all_camera_grouped_feats_2 = []
+                for j in range(num_cam):
+                    curr_instance_map_1 = instance_mask1[i, j]  # (h, w)
+                    curr_instance_map_2 = instance_mask2[i, j]
+
+                    curr_sample_pts_1 = sample_pts1[i, j]  # (N, 2)
+                    curr_sample_pts_2 = sample_pts2[i, j]
+
+                    num_valid_pts = int(curr_sample_pts_1[-1, 0])
+                    end += num_valid_pts
+
+                    curr_sample_pts_1 = curr_sample_pts_1[:num_valid_pts]
+                    curr_sample_pts_2 = curr_sample_pts_2[:num_valid_pts]
+
+                    # fetch the corresponding instance mask ids
+                    valid_inst_ids1, valid_inst_ids2, selected_pts_indices, final_inst_ids1, final_inst_ids2 = \
+                        self.sample_both_valid_instance(
+                            curr_instance_map_1, curr_sample_pts_1,
+                            curr_instance_map_2, curr_sample_pts_2)
+
+                    curr_render_semantic1 = semantic_pred1[start:end][selected_pts_indices]  # (num_sample_points, C)
+                    curr_render_semantic2 = semantic_pred2[start:end][selected_pts_indices]  # (num_sample_points, C)
+
+                    grouped_semantic1 = scatter_mean(curr_render_semantic1,
+                                                     valid_inst_ids1,
+                                                     dim=0)
+                    grouped_semantic2 = scatter_mean(curr_render_semantic2,
+                                                     valid_inst_ids2,
+                                                     dim=0)
+                    curr_grouped_feats1 = grouped_semantic1[final_inst_ids1]
+                    curr_grouped_feats2 = grouped_semantic2[final_inst_ids2]
+
+                    all_camera_grouped_feats_1.append(curr_grouped_feats1)
+                    all_camera_grouped_feats_2.append(curr_grouped_feats2)
+                    
+                    start = end
+                
+                all_camera_grouped_feats_1 = torch.concat(all_camera_grouped_feats_1, dim=0)[None]
+                all_camera_grouped_feats_2 = torch.concat(all_camera_grouped_feats_2, dim=0)[None]
+                curr_batch_loss = compute_tig_feat_align_loss(
+                    all_camera_grouped_feats_1, all_camera_grouped_feats_2,
+                    loss_inter_instance_weight=self.loss_inter_instance_weight,
+                    loss_inter_channel_weight=self.loss_inter_channel_weight
+                    )
+
+                batched_loss.append(curr_batch_loss)
+            
+            loss_semantic_temporal_align = compute_batched_loss_dict_list(batched_loss)
+            losses.update(loss_semantic_temporal_align)
+        
         return losses
     
+    def sample_both_valid_instance(self, 
+                                   instance_mask1, sample_pts1, 
+                                   instance_mask2, sample_pts2):
+        """_summary_
+
+        Args:
+            instance_mask1 (Tensor): (h, w)
+            sample_pts1 (Tensor): (N, 2)
+            instance_mask2 (Tensor): (h, w)
+            sample_pts2 (Tensor): (N, 2)
+
+        Returns:
+            _type_: _description_
+        """
+        # obtain the sampled instance ids according to the sample pts coordinates
+        sampled_instance_mask1 = instance_mask1[sample_pts1[:, 1], sample_pts1[:, 0]]  # (N,)
+        sampled_instance_mask2 = instance_mask2[sample_pts2[:, 1], sample_pts2[:, 0]]  # (N,)
+
+        valid_sampled_instance_mask1 = sampled_instance_mask1 != -1
+        valid_sampled_instance_mask2 = sampled_instance_mask2 != -1
+        both_valid_instace_mask = valid_sampled_instance_mask1 & valid_sampled_instance_mask2
+
+        selected_instance_id1 = sampled_instance_mask1[both_valid_instace_mask]  # (M,)
+        selected_instance_id2 = sampled_instance_mask2[both_valid_instace_mask]  # (M,)
+
+        all_selected_points_indices = torch.nonzero(both_valid_instace_mask).squeeze(1)
+
+        # we sample the points from the first frame
+        unique_sampled_inst_ids = torch.unique(selected_instance_id1)
+        sampled_mask = (sampled_instance_mask1.unsqueeze(-1) == unique_sampled_inst_ids)
+
+        final_inst_ids1, final_inst_ids2 = [], []
+        for i in range(len(unique_sampled_inst_ids)):
+            valid_indices = torch.nonzero(sampled_mask[:, i])  # (M, 1)
+
+            selected_indix = torch.randperm(valid_indices.size(0))[:1]
+            selected_indix = valid_indices[selected_indix].squeeze(1)
+
+            selected_pt2 = sample_pts2[selected_indix]  # (1, 2)
+            
+            final_inst_id2 = instance_mask2[selected_pt2[:, 1], selected_pt2[:, 0]]
+            
+            final_inst_ids1.append(unique_sampled_inst_ids[i].item())
+            final_inst_ids2.append(final_inst_id2.item())
+
+        return (selected_instance_id1, 
+                selected_instance_id2, 
+                all_selected_points_indices,
+                final_inst_ids1,
+                final_inst_ids2)
+        
     def loss(self, 
              input_dict: Dict,
              seq_len=2,

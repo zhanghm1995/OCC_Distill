@@ -1111,7 +1111,7 @@ class BEVStereo4DOCCTemporalNeRFPretrainV3(BEVStereo4DOCCNeRFRretrain):
 
         # rendering
         if self.NeRFDecoder.mask_render:
-            # (b, num_cam, h, w)
+            # (seq_len*b, num_cam, h, w)
             render_mask = self.prepare_render_mask(sample_pts_pad, render_gt_depth)
 
             render_depth, rgb_pred, semantic_pred = self.NeRFDecoder(
@@ -1176,7 +1176,7 @@ class BEVStereo4DOCCTemporalNeRFPretrainV3(BEVStereo4DOCCNeRFRretrain):
             render_gt_depth (_type_): (seq_len*b, num_cam, h, w)
 
         Returns:
-            _type_: _description_
+            _type_: (seq_len*b, num_cam, h, w)
         """
         bs, num_cam = sample_pts_pad.shape[:2]
         render_mask = torch.zeros_like(render_gt_depth)
