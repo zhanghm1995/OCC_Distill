@@ -125,8 +125,9 @@ def compute_batched_loss_dict_list(loss_dict_list):
     # compute the batched loss dict
     batched_loss_dict = dict()
     for k in loss_dict_list[0].keys():
-        batched_loss_dict[k] = torch.stack([loss_dict[k] for loss_dict in loss_dict_list], 
-                                           dim=0).mean()
+        loss = torch.stack([loss_dict[k] for loss_dict in loss_dict_list], 
+                            dim=0).mean()
+        batched_loss_dict[k] = loss
     return batched_loss_dict
 
 

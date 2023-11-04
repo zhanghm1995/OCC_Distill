@@ -990,6 +990,7 @@ class BEVStereo4DOCCTemporalNeRFPretrainV3(BEVStereo4DOCCNeRFRretrain):
                  use_render_depth_loss=True,
                  use_lss_depth_loss=True,
                  use_temporal_align_loss=True,
+                 use_loss_norm=False,
                  **kwargs):
         
         super(BEVStereo4DOCCTemporalNeRFPretrainV3, self).__init__(
@@ -998,6 +999,7 @@ class BEVStereo4DOCCTemporalNeRFPretrainV3(BEVStereo4DOCCNeRFRretrain):
         self.use_lss_depth_loss = use_lss_depth_loss
         self.use_render_depth_loss = use_render_depth_loss
         self.use_temporal_align_loss = use_temporal_align_loss
+        self.use_loss_norm = use_loss_norm
 
         if pretrain_head is not None:
             self.pretrain_head = builder.build_head(pretrain_head)
@@ -1165,6 +1167,10 @@ class BEVStereo4DOCCTemporalNeRFPretrainV3(BEVStereo4DOCCNeRFRretrain):
                 losses.update(loss_contrast_dict)
                 end = time.time()
                 print("Computing loss time:", end - start)
+
+        if self.use_loss_norm:
+            for key, value in losses.items():
+                losses[key] = value / value.detach()
 
         return losses
     

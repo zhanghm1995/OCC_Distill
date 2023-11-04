@@ -51,6 +51,7 @@ multi_adj_frame_id_cfg = (1, 1 + 1, 1)
 
 model = dict(
     type='BEVStereo4DOCCTemporalNeRFPretrainV3',
+    use_loss_norm=True,
     use_temporal_align_loss=True,
     use_render_depth_loss=True,
 
@@ -61,7 +62,9 @@ model = dict(
         type='NeRFOccPretrainHead',
         use_semantic_align=True, 
         use_pointwise_align=True,
-        loss_pointwise_align_weight=1.0
+        loss_pointwise_align_weight=1.0,
+        loss_inter_instance_weight=1.0,
+        loss_inter_channel_weight=1.0,
     ),
     
     img_backbone=dict(
@@ -237,7 +240,7 @@ test_data_config = dict(
     ann_file=data_root + 'bevdetv3-lidarseg-nuscenes_infos_val.pkl')
 
 data = dict(
-    samples_per_gpu=2,
+    samples_per_gpu=4,
     workers_per_gpu=4,
     train=dict(
         data_root=data_root,
@@ -274,6 +277,10 @@ custom_hooks = [
         type='MEGVIIEMAHook',
         init_updates=10560,
         priority='NORMAL',
+    ),
+    dict(
+        type='SyncbnControlHook',
+        syncbn_start_epoch=0,
     ),
 ]
 
