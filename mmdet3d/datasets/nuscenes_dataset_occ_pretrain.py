@@ -93,10 +93,26 @@ class NuScenesDatasetOccPretrain(NuScenesDatasetOccpancy):
             elif scene_flow_fp.endswith('npz'):
                 scene_flow_dict = np.load(scene_flow_fp)
 
-                # TODO: need add processing when not using (900, 1600) render size
-                # and please note that the last dimension is the number of points
                 sample_pts_pad1 = scene_flow_dict['coord1']  # (n_cam, n_points, 2)
                 sample_pts_pad2 = scene_flow_dict['coord2']
+
+                render_size = data['render_gt_depth'].shape[-2:]  # (h, w)
+                origin_h, origin_w = 900, 1600
+                height, width = render_size
+
+                # need add processing when not using (900, 1600) render size
+                # and please note that the last dimension is the number of points
+                if height != origin_h or width != origin_w:
+                    scale_h, scale_w = height / origin_h, width / origin_w
+                    
+                    num_valid_pts_arr1 = sample_pts_pad1[:, -1, :].copy()
+                    num_valid_pts_arr2 = sample_pts_pad2[:, -1, :].copy()
+
+                    sample_pts_pad1 *= np.array([scale_w, scale_h])
+                    sample_pts_pad2 *= np.array([scale_w, scale_h])
+
+                    sample_pts_pad1[:, -1, :] = num_valid_pts_arr1
+                    sample_pts_pad2[:, -1, :] = num_valid_pts_arr2
             else:
                 raise NotImplementedError
             
