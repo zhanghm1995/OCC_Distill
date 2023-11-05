@@ -61,7 +61,7 @@ model = dict(
         type='NeRFOccPretrainHead',
         use_semantic_align=False, 
         use_pointwise_align=True,
-        loss_pointwise_align_weight=1.0
+        loss_pointwise_align_weight=10.0
     ),
     
     img_backbone=dict(
@@ -93,7 +93,7 @@ model = dict(
         stepsize=grid_config['depth'][2],
         voxels_size=voxel_size,
         mode='bilinear',  # ['bilinear', 'nearest']
-        render_type='density',  # ['DVGO', 'prob', 'density']
+        render_type='DVGO',  # ['DVGO', 'prob', 'density']
         render_size=data_config['render_size'],
         depth_range=grid_config['depth'][:2],
         loss_nerf_weight=1.0,
@@ -238,7 +238,7 @@ test_data_config = dict(
 
 data = dict(
     samples_per_gpu=2,
-    workers_per_gpu=4,
+    workers_per_gpu=6,
     train=dict(
         data_root=data_root,
         ann_file=data_root + 'bevdetv3-lidarseg-nuscenes_infos_train.pkl',
@@ -269,13 +269,13 @@ runner = dict(type='EpochBasedRunner', max_epochs=12)
 
 checkpoint_config = dict(interval=1, max_keep_ckpts=10)
 
-custom_hooks = [
-    dict(
-        type='MEGVIIEMAHook',
-        init_updates=10560,
-        priority='NORMAL',
-    ),
-]
+# custom_hooks = [
+#     dict(
+#         type='MEGVIIEMAHook',
+#         init_updates=10560,
+#         priority='NORMAL',
+#     ),
+# ]
 
 log_config = dict(
     interval=10,

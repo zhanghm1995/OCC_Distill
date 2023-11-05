@@ -220,14 +220,14 @@ share_data_config = dict(
 
 test_data_config = dict(
     pipeline=test_pipeline,
-    ann_file=data_root + 'bevdetv3-inst-nuscenes_infos_val.pkl')
+    ann_file=data_root + 'bevdetv3-lidarseg-nuscenes_infos_val.pkl')
 
 data = dict(
     samples_per_gpu=4,
     workers_per_gpu=6,
     train=dict(
         data_root=data_root,
-        ann_file=data_root + 'bevdetv3-inst-nuscenes_infos_train.pkl',
+        ann_file=data_root + 'bevdetv3-lidarseg-nuscenes_infos_train.pkl',
         pipeline=train_pipeline,
         classes=class_names,
         test_mode=False,
@@ -255,13 +255,13 @@ runner = dict(type='EpochBasedRunner', max_epochs=24)
 
 checkpoint_config = dict(interval=1, max_keep_ckpts=10)
 
-custom_hooks = [
-    dict(
-        type='MEGVIIEMAHook',
-        init_updates=10560,
-        priority='NORMAL',
-    ),
-]
+# custom_hooks = [
+#     dict(
+#         type='MEGVIIEMAHook',
+#         init_updates=10560,
+#         priority='NORMAL',
+#     ),
+# ]
 
 log_config = dict(
     interval=50,
