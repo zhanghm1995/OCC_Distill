@@ -1821,7 +1821,7 @@ class LoadInstanceMaskFromFile(PrepareImageInputsForNeRF):
         self.mode = mode
         self.instance_mask_dir = instance_mask_dir
         self.transform = T.Resize(self.render_size, 
-                                  interpolation=Image.NEAREST)
+                                  interpolation=T.InterpolationMode.NEAREST)
 
     def __call__(self, results):
         if self.mode == 'npz':

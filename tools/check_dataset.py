@@ -163,7 +163,22 @@ def check_nuscene_flow_data():
         pickle.dump(all_data, f)
 
 
+def change_file_extensions():
+    import glob
+    all_files = sorted(glob.glob("data/nuscenes/nuscenes_scene_sequence_npz/*/*.pkl.npz"))
+    print(len(all_files), all_files[:3])
+
+    for file in tqdm(all_files):
+        new_file = file.replace(".pkl.npz", ".npz")
+        print(new_file)
+        os.rename(file, new_file)
+    
+
+
 if __name__ == "__main__":
+    change_file_extensions()
+    exit()
+
     convert_json_sam_mask_to_npz()
 
     # load_data()

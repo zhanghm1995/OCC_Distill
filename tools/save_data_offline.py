@@ -16,6 +16,9 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 from copy import deepcopy
 import cv2
+import torch
+from matplotlib import cm
+from torchvision import transforms as T
 
 
 def load_pickle(pickle_file_path):
@@ -43,6 +46,17 @@ def load_pickle(pickle_file_path):
         
         if idx >= 3:
             break
+
+
+def load_pickle_infos(anno_file):
+    with open(anno_file, "rb") as fp:
+        dataset = pickle.load(fp)
+    
+    data_infos = dataset['infos']
+
+    ## sort the data infos according to the timestamp to keep the same with BEVDet dataloader.
+    data_infos = list(sorted(data_infos, key=lambda e: e['timestamp']))
+    return data_infos
 
 
 def sample_camera_images(anno_file, 
@@ -238,7 +252,7 @@ def save_all_cam_cat_images(anno_file, save_root=None):
 
 
 def get_real_sample_points(sample_pts_pad1, sample_pts_pad2, target_size=(900, 1600)):
-    # we generate these sample points in the 900x1600 image, in this case,
+    # NOTE: we generate these sample points in the 900x1600 image
     origin_h, origin_w = 900, 1600
     height, width = target_size
     scale_h, scale_w = height / origin_h, width / origin_w
@@ -300,6 +314,11 @@ def combine_multi_cam_images(cam_imgs, cam_img_size):
 
 
 def save_point_flow_cat_images(save_root):
+    """Save the concatenated images with the point flow information.
+
+    Args:
+        save_root (str): the save root.
+    """
     anno_file = "data/nuscenes/bevdetv3-lidarseg-nuscenes_infos_val.pkl"
 
     data_root = "./data/nuscenes/nuscenes_scene_sequence_npz"
@@ -396,6 +415,257 @@ def save_point_flow_cat_images(save_root):
             cv2.imwrite(cam_img_path, result)
 
 
+def visualize_instance_image(img_src, instance_mask, kept_list=None):
+    instance_img = np.zeros((*instance_mask.shape, 3), dtype=np.uint8)
+    
+    cmap = cm.get_cmap('jet')
+
+    unique_id = np.unique(instance_mask)
+    for id in unique_id:
+        if id == -1:
+            continue
+
+        if kept_list is not None and id not in kept_list:
+            continue
+
+        # color = np.random.random(3) * 255
+        color = np.concatenate([np.random.random(3)]) * 255
+        # color = np.array(cmap(id)[:3]) * 255
+        instance_img[instance_mask == id] = color
+    
+    alpha = 0.42
+    image_combined = cv2.addWeighted(img_src, 1 - alpha, instance_img, alpha, 0)
+    return image_combined
+
+
+def visualize_two_instance_mask(img_src1, inst_mask1, selected_inst_id1,
+                                img_src2, inst_mask2, selected_inst_id2):
+    
+    assert len(selected_inst_id1) == len(selected_inst_id2)
+
+    instance_img1 = np.zeros((*inst_mask1.shape, 3), dtype=np.uint8)
+    instance_img2 = np.zeros((*inst_mask2.shape, 3), dtype=np.uint8)
+    
+    cmap = cm.get_cmap('jet')
+
+    for id1, id2 in zip(selected_inst_id1, selected_inst_id2):
+        color = np.concatenate([np.random.random(3)]) * 255
+
+        instance_img1[inst_mask1 == id1] = color
+        instance_img2[inst_mask2 == id2] = color
+    
+    alpha = 0.45
+    image_combined1 = cv2.addWeighted(img_src1, 1 - alpha, instance_img1, alpha, 0)
+    image_combined2 = cv2.addWeighted(img_src2, 1 - alpha, instance_img2, alpha, 0)
+    return image_combined1, image_combined2
+
+
+def visualize_sam_mask(save_root=None):
+    instance_mask_dir = "data/nuscenes/sam_mask_npz_val"
+    anno_file = "data/nuscenes/bevdetv3-lidarseg-nuscenes_infos_val.pkl"
+
+    with open(anno_file, "rb") as fp:
+        dataset = pickle.load(fp)
+    
+    data_infos = dataset['infos']
+
+    ## sort the data infos according to the timestamp to keep the same with BEVDet dataloader.
+    data_infos = list(sorted(data_infos, key=lambda e: e['timestamp']))
+
+    cam_names = [
+        'CAM_FRONT_LEFT', 'CAM_FRONT', 'CAM_FRONT_RIGHT', 'CAM_BACK_LEFT',
+        'CAM_BACK', 'CAM_BACK_RIGHT'
+    ]
+
+    alpha = 0.7
+    cam_img_size = [480, 270]  # [w, h]
+    cam_img_size = [1600, 900]  # [w, h]
+    for idx, info in tqdm(enumerate(data_infos), total=len(data_infos)):
+        cam_infos = info['cams']
+        sample_token = info['token']
+
+        # load the instance mask
+        instance_mask_path = osp.join(instance_mask_dir, 
+                                      f"{sample_token}.npz")
+        instance_mask_all_cams = np.load(instance_mask_path)['arr_0'].astype(np.int64)
+
+        # -1 means we donot detect any instances in these regions
+        instance_imgs = instance_mask_all_cams - 1  # (6, H, W)
+
+        # read the camera images
+        cam_imgs1 = load_images(cam_infos, cam_names, cam_img_size)
+
+        # visualize the instance mask
+        for i, name in enumerate(cam_names):
+            mask = instance_imgs[i]
+            img_src = cam_imgs1[i]
+
+            img_combined = visualize_instance_image(img_src, mask)
+
+            save_path = osp.join(save_root, f"{idx:06d}_{name}.jpg")
+            cv2.imwrite(save_path, img_combined)
+
+        break
+
+
+def load_instance_mask(instance_mask_path, target_size=(480, 270)):
+    transform = T.Resize((target_size[1], target_size[0]), 
+                         interpolation=T.InterpolationMode.NEAREST)
+    
+    instance_mask_all_cams = np.load(instance_mask_path)['arr_0'].astype(np.int64)
+    instance_mask_all_cams = torch.from_numpy(instance_mask_all_cams)
+    instance_mask_all_cams = transform(instance_mask_all_cams)
+
+    # -1 means we donot detect any instances in these regions
+    instance_imgs = instance_mask_all_cams - 1  # (6, H, W)
+    return instance_imgs.numpy()
+
+
+def visualize_linked_sam_mask(save_root=None):
+    anno_file = "data/nuscenes/bevdetv3-lidarseg-nuscenes_infos_val.pkl"
+    data_infos = load_pickle_infos(anno_file)
+
+    data_root = "./data/nuscenes/nuscenes_scene_sequence_npz"
+    instance_mask_dir = "data/nuscenes/sam_mask_npz_val"
+
+    cam_names = [
+        'CAM_FRONT_LEFT', 'CAM_FRONT', 'CAM_FRONT_RIGHT', 'CAM_BACK_LEFT',
+        'CAM_BACK', 'CAM_BACK_RIGHT'
+    ]
+
+    cam_img_size = [480, 270]  # [w, h]
+    for idx, info in tqdm(enumerate(data_infos), total=len(data_infos)):
+        if idx < 200:
+            continue
+
+        cam_infos = info['cams']
+
+        cam_imgs1 = load_images(cam_infos, cam_names, cam_img_size)
+
+        scene_token = info['scene_token']
+        sample_token = info['token']
+
+        # get the next frame
+        next_idx = min(idx + 1, len(data_infos) - 1)
+        next_info = data_infos[next_idx]
+        next_scene_token = next_info['scene_token']
+        next_sample_token = next_info['token']
+
+        cam_imgs2 = load_images(next_info['cams'], cam_names, cam_img_size)
+
+        ### load the instance mask
+        instance_mask_path1 = osp.join(instance_mask_dir, 
+                                      f"{sample_token}.npz")
+        instance_mask_path2 = osp.join(instance_mask_dir, 
+                                      f"{next_sample_token}.npz")
+
+        # -1 means we donot detect any instances in these regions
+        instance_imgs1 = load_instance_mask(instance_mask_path1, target_size=cam_img_size)
+        instance_imgs2 = load_instance_mask(instance_mask_path2, target_size=cam_img_size)
+        
+        if scene_token != next_scene_token:
+            vis_cam_imgs1 = deepcopy(cam_imgs1)
+            vis_cam_imgs2 = deepcopy(cam_imgs2)
+        else:
+            scene_flow_file = osp.join(data_root,
+                                       scene_token, 
+                                       f"{sample_token}_{next_sample_token}.npz")
+            scene_flow_dict = np.load(scene_flow_file)
+            # (n_cam, n_points, 2)
+            sample_pts_pad1 = scene_flow_dict['coord1']
+            sample_pts_pad2 = scene_flow_dict['coord2']
+
+            all_cams_sample_pts1, all_cams_sample_pts2 = get_real_sample_points(
+                sample_pts_pad1, sample_pts_pad2, target_size=(cam_img_size[1], cam_img_size[0]))
+
+            ## Draw points on the image
+            vis_cam_imgs1 = []
+            vis_cam_imgs2 = []
+            for i in range(len(cam_names)):
+                img1 = cam_imgs1[i]
+                img2 = cam_imgs2[i]
+
+                sample_pts1 = all_cams_sample_pts1[i].astype(np.int64)
+                sample_pts2 = all_cams_sample_pts2[i].astype(np.int64)
+
+                instance_mask1 = instance_imgs1[i]
+                instance_mask2 = instance_imgs2[i]
+
+                all_selected_points_indices = sample_both_valid_points(
+                    instance_mask1, sample_pts1,
+                    instance_mask2, sample_pts2)
+
+                selected_pts1 = sample_pts1[all_selected_points_indices]
+                selected_pts2 = sample_pts2[all_selected_points_indices]
+
+                selected_inst_id1 = instance_mask1[selected_pts1[:, 1], selected_pts1[:, 0]]
+                selected_inst_id2 = instance_mask2[selected_pts2[:, 1], selected_pts2[:, 0]]
+                
+                img1, img2 = visualize_two_instance_mask(img1, instance_mask1, selected_inst_id1,
+                                                         img2, instance_mask2, selected_inst_id2)
+                
+                img1 = Image.fromarray(img1)
+                img2 = Image.fromarray(img2)
+                vis_cam_imgs1.append(img1)
+                vis_cam_imgs2.append(img2)
+
+        ## start saving
+        result1 = combine_multi_cam_images(vis_cam_imgs1, cam_img_size)
+        result2 = combine_multi_cam_images(vis_cam_imgs2, cam_img_size)
+
+        if save_root is not None:
+            result1 = np.array(result1)
+            result2 = np.array(result2)
+
+            blank_bar = np.ones((10, result1.shape[1], 3), dtype=np.uint8) * 255
+            result = np.concatenate([result1, blank_bar, result2], axis=0).astype(np.uint8)
+
+            # create the camera image directory
+            os.makedirs(save_root, exist_ok=True)
+            cam_img_path = osp.join(save_root, f"{idx:06d}_inst.jpg")
+            cv2.imwrite(cam_img_path, result)
+
+
+def sample_both_valid_points(instance_mask1, sample_pts1,
+                             instance_mask2, sample_pts2):
+    instance_mask1 = torch.from_numpy(instance_mask1)
+    instance_mask2 = torch.from_numpy(instance_mask2)
+
+    sample_pts1 = torch.from_numpy(sample_pts1)
+    sample_pts2 = torch.from_numpy(sample_pts2)
+
+    num_selected_pixels = 1  # the number of selected pixels for each instance
+
+    # obtain the valid points
+    sampled_instance_mask = instance_mask1[sample_pts1[:, 1], sample_pts1[:, 0]]  # (N,)
+    unique_sampled_inst_ids = torch.unique(sampled_instance_mask)
+    sampled_mask = (sampled_instance_mask.unsqueeze(-1) == unique_sampled_inst_ids)
+
+    all_selected_points_indices = []
+    for i in range(len(unique_sampled_inst_ids)):
+        if unique_sampled_inst_ids[i] == -1:
+            continue
+
+        valid_indices = torch.nonzero(sampled_mask[..., i])
+        if valid_indices.size(0) < 3:
+            continue
+        
+        # randomly select the points
+        selected_indices = torch.randperm(valid_indices.size(0))[:num_selected_pixels]
+        selected_indices_raw = valid_indices[selected_indices].squeeze(1)
+
+        # check whether this point is valid in the second frame
+        instance_id2 = sample_pts2[selected_indices_raw]
+        if torch.any(instance_mask2[instance_id2[:, 1], instance_id2[:, 0]] == -1):
+            continue
+        all_selected_points_indices.extend(selected_indices_raw)
+    
+    if len(all_selected_points_indices) == 0:
+        return None
+    all_selected_points_indices = torch.stack(all_selected_points_indices, dim=0)
+    return all_selected_points_indices.numpy()
+
+
 def read_sam_mask():
     image_path = "debug/CAM_BACK/98f0569def5c4a5cb980642d2cff2f5b_mask.png"
     image_path = "debug/CAM_BACK_LEFT/0b04a20f4e2043b4be89673cc0787cd0_mask.png"
@@ -476,6 +746,11 @@ def save_scene_sequence_image(anno_file):
 
 
 if __name__ == "__main__":
+    # visualize_sam_mask(save_root="./results/cvpr_flow_points_cat")
+
+    visualize_linked_sam_mask(save_root="./results/cvpr_flow_points_cat")
+    exit(0)
+
     save_point_flow_cat_images(save_root="./results/cvpr_flow_points_cat")
     exit(0)
 

@@ -419,8 +419,12 @@ class NeRFOccPretrainHead(BaseModule):
 
         if self.use_pointwise_align:
             ## compute the temporal pointwise align loss
-            loss_semantic_align_pointwise = F.mse_loss(
-                semantic_pred1, semantic_pred2)
+            # loss_semantic_align_pointwise = F.mse_loss(
+            #     semantic_pred1, semantic_pred2)
+            
+            loss_semantic_align_pointwise = cross_modality_contrastive_loss(
+                semantic_pred1, semantic_pred2
+            )
 
             losses['loss_pointwise_align'] = \
                 loss_semantic_align_pointwise * self.loss_pointwise_align_weight
@@ -733,7 +737,7 @@ class NeRFOccPretrainHead(BaseModule):
         for i in range(bs):
             all_cams_feats1 = []
             all_cams_feats2 = []
-            
+
             for j in range(num_cam):
                 num_valid_pts = int(sample_pts1[i, j, -1, 0])
 

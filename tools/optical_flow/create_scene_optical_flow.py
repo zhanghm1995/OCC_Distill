@@ -565,7 +565,7 @@ def process_two_frames_filter_occlusions(frame1,
     """
     sample_token1 = frame1['token']
     sample_token2 = frame2['token']
-    save_path = osp.join(scene_save_dir, f"{sample_token1}_{sample_token2}.pkl")
+    save_path = osp.join(scene_save_dir, f"{sample_token1}_{sample_token2}.npz")
     
     if osp.exists(save_path):
         return
@@ -875,7 +875,7 @@ def main_all_objects(anno_file):
     scene_name_list, total_scene_seq = get_scene_sequence_data(data_infos)
     print(len(total_scene_seq), len(scene_name_list))
 
-    range1, range2 = 200, 300
+    range1, range2 = 0, 701
     scene_name_list = scene_name_list[range1:range2]
     total_scene_seq = total_scene_seq[range1:range2]
     print(f"Processing the data from sequence: {range1} to {range2}")
