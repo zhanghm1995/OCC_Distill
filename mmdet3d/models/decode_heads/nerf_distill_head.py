@@ -730,9 +730,10 @@ class NeRFOccPretrainHead(BaseModule):
 
         batched_loss = []
 
-        all_cams_feats1 = []
-        all_cams_feats2 = []
         for i in range(bs):
+            all_cams_feats1 = []
+            all_cams_feats2 = []
+            
             for j in range(num_cam):
                 num_valid_pts = int(sample_pts1[i, j, -1, 0])
 
@@ -815,6 +816,9 @@ class NeRFOccPretrainHead(BaseModule):
                 selected_points_indices = self.sample_both_valid_points(
                     curr_instance_map_1, curr_sample_pts_1,
                     curr_instance_map_2, curr_sample_pts_2)
+
+                if selected_points_indices is None:
+                    continue
 
                 selected_points1 = curr_sample_pts_1[selected_points_indices]
                 selected_points2 = curr_sample_pts_2[selected_points_indices]
@@ -990,7 +994,7 @@ class NeRFOccPretrainHead(BaseModule):
                 continue
 
             valid_indices = torch.nonzero(sampled_mask[..., i])
-            if valid_indices.size(0) <= num_selected_pixels:
+            if valid_indices.size(0) < 3:
                 continue
             
             # randomly select the points
@@ -1003,6 +1007,8 @@ class NeRFOccPretrainHead(BaseModule):
                 continue
             all_selected_points_indices.extend(selected_indices_raw)
         
+        if len(all_selected_points_indices) == 0:
+            return None
         all_selected_points_indices = torch.stack(all_selected_points_indices, dim=0)
         return all_selected_points_indices
 

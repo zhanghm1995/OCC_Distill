@@ -21,11 +21,11 @@ data_config = {
     ],
     'Ncams':
         6,
-    # 'input_size': (256, 704),
-    'input_size': (224, 352), # SMALL FOR DEBUG
+    'input_size': (256, 704),
+    # 'input_size': (224, 352), # SMALL FOR DEBUG
     'src_size': (900, 1600),
-    'render_size': (90, 160), # SMALL FOR DEBUG
-    # 'render_size': (150, 267),
+    # 'render_size': (90, 160), # SMALL FOR DEBUG
+    'render_size': (112, 200),
 
     # Augmentation
     'resize': (-0.06, 0.11),
@@ -62,9 +62,9 @@ model = dict(
         type='NeRFOccPretrainHead',
         use_semantic_align=True, 
         use_pointwise_align=True,
-        loss_pointwise_align_weight=1.0,
-        loss_inter_instance_weight=100.0,
-        loss_inter_channel_weight=10.0,
+        loss_pointwise_align_weight=100.0,
+        loss_inter_instance_weight=10.0,
+        loss_inter_channel_weight=1.0,
     ),
     
     img_backbone=dict(
@@ -240,7 +240,7 @@ test_data_config = dict(
     ann_file=data_root + 'bevdetv3-lidarseg-nuscenes_infos_val.pkl')
 
 data = dict(
-    samples_per_gpu=1,
+    samples_per_gpu=2,
     workers_per_gpu=4,
     train=dict(
         data_root=data_root,
@@ -272,12 +272,12 @@ runner = dict(type='EpochBasedRunner', max_epochs=12)
 
 checkpoint_config = dict(interval=1, max_keep_ckpts=10)
 
-# custom_hooks = [
-#     dict(
-#         type='SyncbnControlHook',
-#         syncbn_start_epoch=0,
-#     ),
-# ]
+custom_hooks = [
+    dict(
+        type='SyncbnControlHook',
+        syncbn_start_epoch=0,
+    ),
+]
 
 log_config = dict(
     interval=10,
