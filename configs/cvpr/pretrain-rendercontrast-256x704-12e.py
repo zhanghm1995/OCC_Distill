@@ -96,7 +96,7 @@ model = dict(
         stepsize=grid_config['depth'][2],
         voxels_size=voxel_size,
         mode='bilinear',  # ['bilinear', 'nearest']
-        render_type='density',  # ['DVGO', 'prob', 'density']
+        render_type='DVGO',  # ['DVGO', 'prob', 'density']
         render_size=data_config['render_size'],
         depth_range=grid_config['depth'][:2],
         loss_nerf_weight=1.0,
@@ -240,8 +240,8 @@ test_data_config = dict(
     ann_file=data_root + 'bevdetv3-lidarseg-nuscenes_infos_val.pkl')
 
 data = dict(
-    samples_per_gpu=4,
-    workers_per_gpu=4,
+    samples_per_gpu=2,
+    workers_per_gpu=6,
     train=dict(
         data_root=data_root,
         ann_file=data_root + 'bevdetv3-lidarseg-nuscenes_infos_train.pkl',
@@ -259,7 +259,15 @@ for key in ['val', 'train', 'test']:
     data[key].update(share_data_config)
 
 # Optimizer
-optimizer = dict(type='AdamW', lr=1e-4, weight_decay=1e-2)
+optimizer = dict(
+    type='AdamW', 
+    lr=1e-4, 
+    weight_decay=1e-2,
+    paramwise_cfg=dict(
+        custom_keys={
+            'img_view_transformer.depth_net': dict(lr_mult=0.1),
+        }),)
+
 optimizer_config = dict(grad_clip=dict(max_norm=5, norm_type=2))
 lr_config = dict(
     policy='step',
@@ -273,11 +281,6 @@ runner = dict(type='EpochBasedRunner', max_epochs=12)
 checkpoint_config = dict(interval=1, max_keep_ckpts=10)
 
 custom_hooks = [
-    dict(
-        type='MEGVIIEMAHook',
-        init_updates=10560,
-        priority='NORMAL',
-    ),
     dict(
         type='SyncbnControlHook',
         syncbn_start_epoch=0,
