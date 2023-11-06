@@ -368,7 +368,7 @@ class NeRFOccPretrainHead(BaseModule):
                  loss_semantic_align_weight=1.0,
                  loss_inter_instance_weight=1.0,
                  loss_inter_channel_weight=1.0,
-                 semantic_align_type='query_fixed', # kl | contrastive
+                 semantic_align_type='query_flow_all', # kl | contrastive
                  occ_logits_align_loss=None,
                  detach_target=False,
                  init_cfg=None,
@@ -419,8 +419,12 @@ class NeRFOccPretrainHead(BaseModule):
 
         if self.use_pointwise_align:
             ## compute the temporal pointwise align loss
-            loss_semantic_align_pointwise = F.mse_loss(
-                semantic_pred1, semantic_pred2)
+            # loss_semantic_align_pointwise = F.mse_loss(
+            #     semantic_pred1, semantic_pred2)
+            
+            loss_semantic_align_pointwise = cross_modality_contrastive_loss(
+                semantic_pred1, semantic_pred2
+            )
 
             losses['loss_pointwise_align'] = \
                 loss_semantic_align_pointwise * self.loss_pointwise_align_weight
@@ -566,27 +570,23 @@ class NeRFOccPretrainHead(BaseModule):
         
         losses = dict()
 
-        if self.use_depth_align:
-            render_weights_stu = input_dict['render_weights']
-            render_weights_tea = input_dict['render_weights']
-            loss_depth_align = self.compute_depth_align_loss(
-                render_weights_stu, render_weights_tea)
-            losses['loss_depth_align'] = loss_depth_align
+        assert 'render_semantic' in input_dict
+        assert 'sample_pts_pad' in kwargs
+
+        semantic_pred = input_dict['render_semantic']  # (seq*b, num_cam, c, h, w)
+        semantic_pred = rearrange(
+            semantic_pred, 
+            '(seq b) num_cam c h w -> seq b num_cam h w c', seq=seq_len)
         
-        if self.use_pointwise_align:
-            assert 'render_semantic' in input_dict
-            assert 'sample_pts_pad' in kwargs
-
-            semantic_pred = input_dict['render_semantic']  # (b*seq, num_cam, c, h, w)
-
-            sample_pts = kwargs['sample_pts_pad']  # (b*seq, num_cam, N, 2)
-            if rand_view_idx is not None:
+        sample_pts = kwargs['sample_pts_pad']  # (seq*b, num_cam, N, 2)
+        if rand_view_idx is not None:
                 sample_pts = sample_pts[:, rand_view_idx]
             
-            sample_pts = rearrange(sample_pts,
-                                    '(b seq) num_cam N uv -> seq b num_cam N uv',
-                                    seq=seq_len)
-            
+        sample_pts = rearrange(sample_pts,
+                               '(seq b) num_cam N uv -> seq b num_cam N uv',
+                               seq=seq_len)
+    
+        if self.use_pointwise_align:
             loss_pointwise_align = self.compute_pointwise_loss_with_flow(
                 semantic_pred[0], semantic_pred[1],
                 sample_pts[0], sample_pts[1],
@@ -594,14 +594,7 @@ class NeRFOccPretrainHead(BaseModule):
             losses['loss_pointwise_align'] = loss_pointwise_align
         
         if self.use_semantic_align:
-            assert 'render_semantic' in input_dict
-            semantic_pred = input_dict['render_semantic']  # (b*seq, num_cam, c, h, w)
-            
             ## compare the temporal rendering semantic map
-            semantic_pred = rearrange(
-                semantic_pred, 
-                '(b seq) num_cam c h w -> seq b num_cam h w c', seq=seq_len)
-
             if self.semantic_align_type == 'kl':
                 loss_semantic_align = self.compute_semantic_kl_loss(
                     semantic_pred[0], semantic_pred[1],
@@ -627,21 +620,13 @@ class NeRFOccPretrainHead(BaseModule):
                 ## Here we adapt the background flow info to align the temporal
                 # instance masks
                 assert 'instance_masks' in kwargs
-                assert 'sample_pts_pad' in kwargs
-
-                instance_mask = kwargs['instance_masks']  # (b*seq, num_cam, h, w)
-                sample_pts = kwargs['sample_pts_pad']  # (b*seq, num_cam, N, 2)
+                instance_mask = kwargs['instance_masks']  # (seq*b, num_cam, h, w)
                 if rand_view_idx is not None:
                     instance_mask = instance_mask[:, rand_view_idx]
-                    sample_pts = sample_pts[:, rand_view_idx]
                 
                 instance_mask = rearrange(instance_mask,
-                                          '(b seq) num_cam h w -> seq b num_cam h w',
+                                          '(seq b) num_cam h w -> seq b num_cam h w',
                                           seq=seq_len)
-                sample_pts = rearrange(sample_pts,
-                                       '(b seq) num_cam N uv -> seq b num_cam N uv',
-                                       seq=seq_len)
-                
                 loss_semantic_contrast_dict = self.compute_semantic_contrast_loss_with_flow(
                     semantic_pred[0], semantic_pred[1],
                     instance_mask[0], instance_mask[1],
@@ -747,26 +732,32 @@ class NeRFOccPretrainHead(BaseModule):
         """
         bs, num_cam, h, w, c = render_semantic1.shape
 
-        all_points_feats1 = []
-        all_points_feats2 = []
+        batched_loss = []
+
         for i in range(bs):
+            all_cams_feats1 = []
+            all_cams_feats2 = []
+
             for j in range(num_cam):
-                num_valid_pts = sample_pts1[i, j, -1, 0]
+                num_valid_pts = int(sample_pts1[i, j, -1, 0])
 
                 curr_sample_pts1 = sample_pts1[i, j, :num_valid_pts]
                 curr_sample_pts2 = sample_pts2[i, j, :num_valid_pts]
 
                 curr_render_semantic1 = render_semantic1[i, j][curr_sample_pts1[:, 1], curr_sample_pts1[:, 0]]
                 curr_render_semantic2 = render_semantic2[i, j][curr_sample_pts2[:, 1], curr_sample_pts2[:, 0]]
-                all_points_feats1.append(curr_render_semantic1)
-                all_points_feats2.append(curr_render_semantic2)
+                all_cams_feats1.append(curr_render_semantic1)
+                all_cams_feats2.append(curr_render_semantic2)
         
-        all_points_feats1 = torch.cat(all_points_feats1, dim=0)
-        all_points_feats2 = torch.cat(all_points_feats2, dim=0)
+            all_cams_feats1 = torch.cat(all_cams_feats1, dim=0)  # (N, c)
+            all_cams_feats2 = torch.cat(all_cams_feats2, dim=0)  # (N, c)
+            loss_pointwise_all_cams = F.mse_loss(
+                all_cams_feats1, all_cams_feats2, reduction='mean')
 
+            batched_loss.append(loss_pointwise_all_cams)
+        
         ## compute the loss
-        loss_semantic_align_pointwise = F.mse_loss(
-            all_points_feats1, all_points_feats2)
+        loss_semantic_align_pointwise = torch.stack(batched_loss).mean()
 
         return loss_semantic_align_pointwise * loss_weight
 
@@ -829,6 +820,9 @@ class NeRFOccPretrainHead(BaseModule):
                 selected_points_indices = self.sample_both_valid_points(
                     curr_instance_map_1, curr_sample_pts_1,
                     curr_instance_map_2, curr_sample_pts_2)
+
+                if selected_points_indices is None:
+                    continue
 
                 selected_points1 = curr_sample_pts_1[selected_points_indices]
                 selected_points2 = curr_sample_pts_2[selected_points_indices]
@@ -1004,7 +998,7 @@ class NeRFOccPretrainHead(BaseModule):
                 continue
 
             valid_indices = torch.nonzero(sampled_mask[..., i])
-            if valid_indices.size(0) <= num_selected_pixels:
+            if valid_indices.size(0) < 3:
                 continue
             
             # randomly select the points
@@ -1017,6 +1011,8 @@ class NeRFOccPretrainHead(BaseModule):
                 continue
             all_selected_points_indices.extend(selected_indices_raw)
         
+        if len(all_selected_points_indices) == 0:
+            return None
         all_selected_points_indices = torch.stack(all_selected_points_indices, dim=0)
         return all_selected_points_indices
 

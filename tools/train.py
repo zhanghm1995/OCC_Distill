@@ -113,6 +113,13 @@ def parse_args():
     return args
 
 
+### Get number of parameters in Module
+def get_num_parameters(model):
+    num = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    num /= 1e6
+    print('Number of parameters: {:.2f}M'.format(num))
+
+
 def main():
     args = parse_args()
 
@@ -221,6 +228,9 @@ def main():
         train_cfg=cfg.get('train_cfg'),
         test_cfg=cfg.get('test_cfg'))
     model.init_weights()
+
+    # get the number of parameters
+    get_num_parameters(model)
 
     sync_bn = cfg.get('sync_bn', False)
     if distributed and sync_bn:

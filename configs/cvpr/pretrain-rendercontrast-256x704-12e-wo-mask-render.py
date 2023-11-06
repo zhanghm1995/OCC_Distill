@@ -2,9 +2,9 @@
 Copyright (c) 2023 by Haiming Zhang. All Rights Reserved.
 
 Author: Haiming Zhang
-Date: 2023-11-02 15:35:51
+Date: 2023-11-05 11:29:26
 Email: haimingzhang@link.cuhk.edu.cn
-Description: Pretrain the BEVDet with rendered depth loss and pointwise align loss.
+Description: Training the RenderContrast without rendering mask.
 '''
 
 _base_ = ['../_base_/datasets/nus-3d.py', '../_base_/default_runtime.py']
@@ -25,7 +25,7 @@ data_config = {
     # 'input_size': (224, 352), # SMALL FOR DEBUG
     'src_size': (900, 1600),
     # 'render_size': (90, 160), # SMALL FOR DEBUG
-    'render_size': (900, 1600),
+    'render_size': (112, 200),
 
     # Augmentation
     'resize': (-0.06, 0.11),
@@ -51,7 +51,8 @@ multi_adj_frame_id_cfg = (1, 1 + 1, 1)
 
 model = dict(
     type='BEVStereo4DOCCTemporalNeRFPretrainV3',
-    use_temporal_align_loss=False,
+    use_loss_norm=False,
+    use_temporal_align_loss=True,
     use_render_depth_loss=True,
 
     align_after_view_transfromation=False,
@@ -59,9 +60,11 @@ model = dict(
 
     pretrain_head=dict(
         type='NeRFOccPretrainHead',
-        use_semantic_align=False, 
+        use_semantic_align=True, 
         use_pointwise_align=True,
-        loss_pointwise_align_weight=10.0
+        loss_pointwise_align_weight=100.0,
+        loss_inter_instance_weight=10.0,
+        loss_inter_channel_weight=1.0,
     ),
     
     img_backbone=dict(
@@ -85,7 +88,7 @@ model = dict(
     ## the nerf decoder head
     nerf_head=dict(
         type='NeRFDecoderHead',
-        mask_render=True,
+        mask_render=False,
         img_recon_head=False,
         semantic_head=True,
         semantic_dim=17,
@@ -153,6 +156,8 @@ train_pipeline = [
         is_train=True,
         data_config=data_config,
         sequential=True),
+    # dict(type='LoadOccGTFromFile'),
+    # dict(type='LoadLiDARSegGTFromFile'),
     dict(
         type='LoadAnnotationsBEVDepth',
         bda_aug_conf=bda_aug_conf,
@@ -164,32 +169,30 @@ train_pipeline = [
         load_dim=5,
         use_dim=5,
         file_client_args=file_client_args),
-    dict(
-        type='PointToMultiViewDepthForNeRF', 
-        downsample=1, 
-        grid_config=grid_config, 
-        render_size=data_config['render_size'],
-        render_scale=[data_config['render_size'][0]/data_config['src_size'][0], 
-                      data_config['render_size'][1]/data_config['src_size'][1]]),
-    # dict(type='LoadInstanceMaskFromFile',
-    #      is_train=True,
-    #      data_config=data_config,
-    #      sequential=False,
-    #      mode='json',
-    #      instance_mask_dir='data/nuscenes/sam_mask_json'),
+    dict(type='PointToMultiViewDepthForNeRF', 
+         downsample=1, 
+         grid_config=grid_config, 
+         render_size=data_config['render_size'],
+         render_scale=[data_config['render_size'][0]/data_config['src_size'][0], 
+                       data_config['render_size'][1]/data_config['src_size'][1]]),
+    dict(type='LoadInstanceMaskFromFile',
+         is_train=True,
+         data_config=data_config,
+         sequential=False,
+         mode='npz',
+         instance_mask_dir='data/nuscenes/sam_mask_npz'),
     dict(type='DefaultFormatBundle3D', class_names=class_names),
     dict(
         type='Collect3D', keys=['img_inputs', 'gt_depth', 
-                                'render_gt_depth',
+                                'instance_masks', 'render_gt_depth',
                                 'intricics', 'pose_spatial', 
                                 'flip_dx', 'flip_dy'])
 ]
 
 test_pipeline = [
-    dict(
-        type='PrepareImageInputsForNeRF', 
-        data_config=data_config, 
-        sequential=True),
+    dict(type='PrepareImageInputsForNeRF', 
+         data_config=data_config, 
+         sequential=True),
     dict(
         type='LoadAnnotationsBEVDepth',
         bda_aug_conf=bda_aug_conf,
@@ -238,7 +241,7 @@ test_data_config = dict(
 
 data = dict(
     samples_per_gpu=2,
-    workers_per_gpu=6,
+    workers_per_gpu=4,
     train=dict(
         data_root=data_root,
         ann_file=data_root + 'bevdetv3-lidarseg-nuscenes_infos_train.pkl',
@@ -269,13 +272,12 @@ runner = dict(type='EpochBasedRunner', max_epochs=12)
 
 checkpoint_config = dict(interval=1, max_keep_ckpts=10)
 
-# custom_hooks = [
-#     dict(
-#         type='MEGVIIEMAHook',
-#         init_updates=10560,
-#         priority='NORMAL',
-#     ),
-# ]
+custom_hooks = [
+    dict(
+        type='SyncbnControlHook',
+        syncbn_start_epoch=0,
+    ),
+]
 
 log_config = dict(
     interval=10,

@@ -508,6 +508,45 @@ def process_two_frames_all_objects(frame1,
         pickle.dump(results, f)
 
 
+def unify2same_length(coords1, coords2, max_num_points=5500):
+    sample_pts_pad1 = np.zeros((len(coords1), max_num_points, 2), dtype=np.float32)
+    sample_pts_pad2 = np.zeros((len(coords2), max_num_points, 2), dtype=np.float32)
+    for idx, (coord1, coord2) in enumerate(zip(coords1, coords2)):
+        assert coord1.shape[0] == coord2.shape[0]
+
+        num_points = min(coord1.shape[0], max_num_points - 1)
+        sample_pts_pad1[idx][:num_points] = coord1[:num_points]
+        sample_pts_pad2[idx][:num_points] = coord2[:num_points]
+
+        # NOTE: here we set the last dimension to be the number of points
+        sample_pts_pad1[idx][max_num_points - 1] = num_points
+        sample_pts_pad2[idx][max_num_points - 1] = num_points
+
+    return sample_pts_pad1, sample_pts_pad2
+
+
+def get_color(points):
+    """_summary_
+
+    Args:
+        points (np.ndarray): (N, 2)
+    """
+    import matplotlib.pyplot as plt
+
+    set_max = range(128)
+    colors = {m: i for i, m in enumerate(set_max)}
+    colors = {m: (255 * np.array(plt.cm.hsv(i/float(len(colors))))[:3][::-1]).astype(np.int32)
+                for m, i in colors.items()}
+
+    center = np.median(points, axis=0)
+    dist = points - center
+
+    coord_angle = np.arctan2(dist[:, 1], dist[:, 0])
+    corr_color = np.int32(64 * coord_angle / np.pi) % 128
+    res_color = [tuple(colors[m].tolist()) for m in corr_color]
+    return res_color
+
+
 def process_two_frames_filter_occlusions(frame1, 
                                          frame2, 
                                          choose_cams, 
@@ -526,6 +565,10 @@ def process_two_frames_filter_occlusions(frame1,
     """
     sample_token1 = frame1['token']
     sample_token2 = frame2['token']
+    save_path = osp.join(scene_save_dir, f"{sample_token1}_{sample_token2}.npz")
+    
+    if osp.exists(save_path):
+        return
 
     lidar2img1 = get_lidar2img_all_cams(frame1, choose_cams)
     lidar2img2 = get_lidar2img_all_cams(frame2, choose_cams)
@@ -655,11 +698,12 @@ def process_two_frames_filter_occlusions(frame1,
             save_path = osp.join(scene_save_dir, f"{i}_{j}_{cam}_{j}.png")
             cv2.imwrite(save_path, img)
 
-    results = {'coord1': results_coord1, 'coord2': results_coord2}
-
-    save_path = osp.join(scene_save_dir, f"{sample_token1}_{sample_token2}.pkl")
-    with open(save_path, 'wb') as f:
-        pickle.dump(results, f)
+    sample_pts_pad1, sample_pts_pad2 = unify2same_length(
+            results_coord1, results_coord2, max_num_points=5500)
+    
+    np.savez_compressed(save_path, 
+                        coord1=sample_pts_pad1, 
+                        coord2=sample_pts_pad2)
 
 
 def process_one_scene(func, scene_name, scene_seq, neighbor_length=3,
@@ -670,21 +714,21 @@ def process_one_scene(func, scene_name, scene_seq, neighbor_length=3,
 
     # sample_token_list = [frame['token'] for frame in scene_seq]
 
-    for i in range(num_frames - 1):
-        for j in range(i + 1, min(i + 1 + neighbor_length, num_frames)):
-            frame1 = deepcopy(scene_seq[i])
-            frame2 = deepcopy(scene_seq[j])
-            func(frame1, frame2, 
-                 choose_cams, 
-                 scene_save_dir, i, j)
-
-    # for i in range(num_frames - 1, 0, -1):
-    #     for j in range(i - 1, max(i - 1 - neighbor_length, -1), -1):
+    # for i in range(num_frames - 1):
+    #     for j in range(i + 1, min(i + 1 + neighbor_length, num_frames)):
     #         frame1 = deepcopy(scene_seq[i])
     #         frame2 = deepcopy(scene_seq[j])
     #         func(frame1, frame2, 
     #              choose_cams, 
     #              scene_save_dir, i, j)
+
+    for i in range(num_frames - 1, 0, -1):
+        for j in range(i - 1, max(i - 1 - neighbor_length, -1), -1):
+            frame1 = deepcopy(scene_seq[i])
+            frame2 = deepcopy(scene_seq[j])
+            func(frame1, frame2, 
+                 choose_cams, 
+                 scene_save_dir, i, j)
 
 
 def save_all_scene_sequence_images(anno_file):
@@ -831,13 +875,20 @@ def main_all_objects(anno_file):
     scene_name_list, total_scene_seq = get_scene_sequence_data(data_infos)
     print(len(total_scene_seq), len(scene_name_list))
 
+    range1, range2 = 0, 701
+    scene_name_list = scene_name_list[range1:range2]
+    total_scene_seq = total_scene_seq[range1:range2]
+    print(f"Processing the data from sequence: {range1} to {range2}")
+
+    print(len(total_scene_seq), len(scene_name_list))
+
     choose_cams = [
         'CAM_FRONT_LEFT', 'CAM_FRONT', 'CAM_FRONT_RIGHT', 'CAM_BACK_LEFT',
         'CAM_BACK', 'CAM_BACK_RIGHT'
     ]
 
     neighbor_length = 2
-    save_dir = "./data/nuscenes_scene_sequence"
+    save_dir = "./data/nuscenes/nuscenes_scene_sequence_npz"
     for idx, (scene_name, scene_seq) in tqdm(enumerate(zip(scene_name_list, total_scene_seq)),
                                              total=len(scene_name_list)):
         process_one_scene(process_two_frames_filter_occlusions, 

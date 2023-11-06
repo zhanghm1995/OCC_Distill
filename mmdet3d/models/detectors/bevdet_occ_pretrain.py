@@ -860,16 +860,11 @@ class BEVStereo4DOCCTemporalNeRFPretrainV2(BEVStereo4DOCCNeRFRretrain):
 
             kwargs = self.reshape_kwargs(kwargs)
         
-        import time
-        torch.cuda.synchronize()
-        start = time.time()
         img_feats, _, depth = self.extract_feat(
             points, img=img_inputs, img_metas=img_metas, **kwargs)
         
         # occupancy prediction
         voxel_feats = self.final_conv(img_feats[0]).permute(0, 4, 3, 2, 1)  # to (b, 200, 200, 16, c)
-        end = time.time()
-        print("Forward time:", end - start)
         
         gt_depth = kwargs['gt_depth']
         intricics = kwargs['intricics']
@@ -918,18 +913,11 @@ class BEVStereo4DOCCTemporalNeRFPretrainV2(BEVStereo4DOCCNeRFRretrain):
 
         # rendering
         if self.NeRFDecoder.mask_render:
-            import time
-            torch.cuda.synchronize()
-            start = time.time()
-
             render_mask = render_gt_depth > 0.0  # (b, num_cam, h, w)
             render_depth, rgb_pred, semantic_pred = self.NeRFDecoder(
                 density_prob_flip, rgb_flip, semantic_flip, 
                 intricics, pose_spatial, True, render_mask)
             
-            end = time.time()
-            print("Rendering time:", end - start)
-
             if self.use_render_depth_loss:
                 render_gt_depth = render_gt_depth[render_mask]
                 loss_nerf = self.NeRFDecoder.compute_depth_loss(
@@ -1139,14 +1127,14 @@ class BEVStereo4DOCCTemporalNeRFPretrainV3(BEVStereo4DOCCNeRFRretrain):
             
         else:  # rendering the whole images
             ## Rendering
-            import time
-            torch.cuda.synchronize()
-            start = time.time()
+            # import time
+            # torch.cuda.synchronize()
+            # start = time.time()
             render_depth, rgb_pred, semantic_pred = self.NeRFDecoder(
                 density_prob_flip, rgb_flip, semantic_flip, 
                 intricics, pose_spatial, True)
-            end = time.time()
-            print("Rendering time:", end - start)
+            # end = time.time()
+            # print("Rendering time:", end - start)
 
             ## Compute nerf losses
             if self.use_render_depth_loss:
@@ -1159,14 +1147,16 @@ class BEVStereo4DOCCTemporalNeRFPretrainV3(BEVStereo4DOCCNeRFRretrain):
 
             if self.use_temporal_align_loss:
                 feats_dict = dict()
-                feats_dict['render_semantic'] = semantic_pred
+                feats_dict['render_semantic'] = semantic_pred  # (seq*b, num_cam, c, h, w)
 
-                start = time.time()
+                # start = time.time()
+                
                 loss_contrast_dict = self.pretrain_head.loss(
                     feats_dict, rand_view_idx=rand_ind, **kwargs)
                 losses.update(loss_contrast_dict)
-                end = time.time()
-                print("Computing loss time:", end - start)
+
+                # end = time.time()
+                # print("Computing loss time:", end - start)
 
         if self.use_loss_norm:
             for key, value in losses.items():

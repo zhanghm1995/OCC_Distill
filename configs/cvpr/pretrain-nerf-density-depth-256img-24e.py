@@ -15,9 +15,3 @@ model = dict(
         render_type='density',  # ['prob', 'density', 'DVGO']
     )
 )
-
-
-data = dict(
-    samples_per_gpu=8,
-    workers_per_gpu=6,
-)

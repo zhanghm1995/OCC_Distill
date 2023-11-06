@@ -2,9 +2,17 @@
 Copyright (c) 2023 by Haiming Zhang. All Rights Reserved.
 
 Author: Haiming Zhang
-Date: 2023-11-02 15:35:51
+Date: 2023-11-07 00:26:06
 Email: haimingzhang@link.cuhk.edu.cn
-Description: Pretrain the BEVDet with rendered depth loss and pointwise align loss.
+Description: 
+'''
+'''
+Copyright (c) 2023 by Haiming Zhang. All Rights Reserved.
+
+Author: Haiming Zhang
+Date: 2023-11-06 10:19:02
+Email: haimingzhang@link.cuhk.edu.cn
+Description: Pretrain the BEVDet with pointwise align loss only.
 '''
 
 _base_ = ['../_base_/datasets/nus-3d.py', '../_base_/default_runtime.py']
@@ -52,7 +60,7 @@ multi_adj_frame_id_cfg = (1, 1 + 1, 1)
 model = dict(
     type='BEVStereo4DOCCTemporalNeRFPretrainV3',
     use_temporal_align_loss=False,
-    use_render_depth_loss=True,
+    use_render_depth_loss=False,
 
     align_after_view_transfromation=False,
     num_adj=len(range(*multi_adj_frame_id_cfg)),
@@ -93,7 +101,7 @@ model = dict(
         stepsize=grid_config['depth'][2],
         voxels_size=voxel_size,
         mode='bilinear',  # ['bilinear', 'nearest']
-        render_type='DVGO',  # ['DVGO', 'prob', 'density']
+        render_type='density',  # ['DVGO', 'prob', 'density']
         render_size=data_config['render_size'],
         depth_range=grid_config['depth'][:2],
         loss_nerf_weight=1.0,
@@ -171,12 +179,6 @@ train_pipeline = [
         render_size=data_config['render_size'],
         render_scale=[data_config['render_size'][0]/data_config['src_size'][0], 
                       data_config['render_size'][1]/data_config['src_size'][1]]),
-    # dict(type='LoadInstanceMaskFromFile',
-    #      is_train=True,
-    #      data_config=data_config,
-    #      sequential=False,
-    #      mode='json',
-    #      instance_mask_dir='data/nuscenes/sam_mask_json'),
     dict(type='DefaultFormatBundle3D', class_names=class_names),
     dict(
         type='Collect3D', keys=['img_inputs', 'gt_depth', 
@@ -265,17 +267,8 @@ lr_config = dict(
     warmup_ratio=0.001,
     step=[100,])
 runner = dict(type='EpochBasedRunner', max_epochs=12)
-# evaluation = dict(interval=24, pipeline=test_pipeline)
 
 checkpoint_config = dict(interval=1, max_keep_ckpts=10)
-
-# custom_hooks = [
-#     dict(
-#         type='MEGVIIEMAHook',
-#         init_updates=10560,
-#         priority='NORMAL',
-#     ),
-# ]
 
 log_config = dict(
     interval=10,
