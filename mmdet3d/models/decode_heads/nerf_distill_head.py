@@ -131,6 +131,22 @@ def compute_batched_loss_dict_list(loss_dict_list):
     return batched_loss_dict
 
 
+def compute_pointwise_similarity_loss(feat1, feat2, instance_idx):
+    # 1) Compute the similarity of pointwise features
+    feat1 = F.normalize(feat1, dim=-1)
+    feat2 = F.normalize(feat2, dim=-1)
+
+    # Compute the cosine similarity
+    similarity = nn.CosineSimilarity(dim=-1)(feat1, feat2)
+
+    # Compute the average similarity of each instance
+    instance_similarity = scatter_mean(similarity, instance_idx, dim=0)
+
+
+
+    
+
+
 @HEADS.register_module()
 class NeRFOccDistillSimpleHead(BaseModule):
     """Simple version of the head to do the knowledge distillation
@@ -419,7 +435,7 @@ class NeRFOccPretrainHead(BaseModule):
         semantic_pred1 = semantic_pred[:num_frame_pixels]
         semantic_pred2 = semantic_pred[num_frame_pixels:]
 
-        if self.use_pointwise_align:
+        if self.use_pointwise_align and self.pointwise_align_type != 'similarity':
             ## compute the temporal pointwise align loss
             if self.pointwise_align_type == 'mse':
                 loss_semantic_align_pointwise = F.mse_loss(
@@ -459,7 +475,6 @@ class NeRFOccPretrainHead(BaseModule):
                     batched_loss.append(torch.stack(all_camera_contrast_loss, dim=0).mean())
                 
                 loss_semantic_align_pointwise = torch.stack(batched_loss, dim=0).mean()
-                
             else:
                 raise NotImplementedError()
             
@@ -467,8 +482,6 @@ class NeRFOccPretrainHead(BaseModule):
                 loss_semantic_align_pointwise * self.loss_pointwise_align_weight
             
         if self.use_semantic_align:
-            ## Here we adapt the flow info to align the temporal
-            # instance masks
             assert 'instance_masks' in kwargs
 
             instance_mask = kwargs['instance_masks']  # (seq*b, num_cam, h, w)
@@ -518,6 +531,12 @@ class NeRFOccPretrainHead(BaseModule):
 
                     curr_render_semantic1 = semantic_pred1[start:end][selected_pts_indices]  # (num_sample_points, C)
                     curr_render_semantic2 = semantic_pred2[start:end][selected_pts_indices]  # (num_sample_points, C)
+
+                    ## compute the pointwise similarity loss by using the instance ids
+                    # compute_pointwise_similarity_loss(curr_render_semantic1, 
+                    #                                   curr_render_semantic2, 
+                    #                                   final_inst_ids1,
+                    #                                   final_inst_ids2)
 
                     grouped_semantic1 = scatter_mean(curr_render_semantic1,
                                                      valid_inst_ids1,
@@ -575,9 +594,18 @@ class NeRFOccPretrainHead(BaseModule):
 
         all_selected_points_indices = torch.nonzero(both_valid_instace_mask).squeeze(1)
 
-        # we sample the points from the first frame
-        unique_sampled_inst_ids = torch.unique(selected_instance_id1)
-        sampled_mask = (sampled_instance_mask1.unsqueeze(-1) == unique_sampled_inst_ids)
+        # use the fewer points to sample the instance ids
+        unique_sampled_inst_ids1 = torch.unique(selected_instance_id1)
+        unique_sampled_inst_ids2 = torch.unique(selected_instance_id2)
+
+        use_first_frame = True
+        if True:  # len(unique_sampled_inst_ids1) <= len(unique_sampled_inst_ids2):
+            unique_sampled_inst_ids = unique_sampled_inst_ids1
+            sampled_mask = (sampled_instance_mask1.unsqueeze(-1) == unique_sampled_inst_ids)
+        else:
+            unique_sampled_inst_ids = unique_sampled_inst_ids2
+            sampled_mask = (sampled_instance_mask2.unsqueeze(-1) == unique_sampled_inst_ids)
+            use_first_frame = False
 
         final_inst_ids1, final_inst_ids2 = [], []
         for i in range(len(unique_sampled_inst_ids)):
@@ -585,13 +613,18 @@ class NeRFOccPretrainHead(BaseModule):
 
             selected_indix = torch.randperm(valid_indices.size(0))[:1]
             selected_indix = valid_indices[selected_indix].squeeze(1)
-
-            selected_pt2 = sample_pts2[selected_indix]  # (1, 2)
-            
-            final_inst_id2 = instance_mask2[selected_pt2[:, 1], selected_pt2[:, 0]]
-            
-            final_inst_ids1.append(unique_sampled_inst_ids[i].item())
-            final_inst_ids2.append(final_inst_id2.item())
+            if use_first_frame:
+                selected_pt2 = sample_pts2[selected_indix]  # (1, 2)
+                final_inst_id2 = instance_mask2[selected_pt2[:, 1], selected_pt2[:, 0]]
+                
+                final_inst_ids1.append(unique_sampled_inst_ids[i].item())
+                final_inst_ids2.append(final_inst_id2.item())
+            else:
+                selected_pt1 = sample_pts1[selected_indix]
+                final_inst_id1 = instance_mask1[selected_pt1[:, 1], selected_pt1[:, 0]]
+                
+                final_inst_ids1.append(final_inst_id1.item())
+                final_inst_ids2.append(unique_sampled_inst_ids[i].item())
 
         return (selected_instance_id1, 
                 selected_instance_id2, 
