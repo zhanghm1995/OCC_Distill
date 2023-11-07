@@ -53,7 +53,7 @@ class NuScenesDatasetOccPretrain(NuScenesDatasetOccpancy):
             output.append(data)
 
             # select the neiborhood frame
-            temporal_interval = np.random.choice([1, 2])
+            temporal_interval = 1
             if np.random.choice([0, 1]):
                 temporal_interval *= -1
             

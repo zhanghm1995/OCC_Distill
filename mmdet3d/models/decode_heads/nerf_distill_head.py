@@ -23,7 +23,7 @@ from ..builder import HEADS
 
 def cross_modality_contrastive_loss(feat1, 
                                     feat2, 
-                                    temperature=0.07):
+                                    temperature=1.0):
     """Compute the contrastive loss between the two features.
 
     Args:
@@ -35,8 +35,8 @@ def cross_modality_contrastive_loss(feat1,
         _type_: _description_
     """
     # Normalize the features
-    feat1 = F.normalize(feat1, dim=-1)
-    feat2 = F.normalize(feat2, dim=-1)
+    # feat1 = F.normalize(feat1, dim=-1)
+    # feat2 = F.normalize(feat2, dim=-1)
 
     # Compute the scalar product between the image features and the point cloud features
     logits = torch.matmul(feat1, feat2.t()) / temperature
@@ -364,6 +364,7 @@ class NeRFOccPretrainHead(BaseModule):
                  use_depth_align=False,
                  use_semantic_align=True,
                  use_pointwise_align=True,
+                 pointwise_align_type='mse',
                  loss_pointwise_align_weight=1.0,
                  loss_semantic_align_weight=1.0,
                  loss_inter_instance_weight=1.0,
@@ -380,6 +381,7 @@ class NeRFOccPretrainHead(BaseModule):
 
         self.use_pointwise_align = use_pointwise_align
         self.loss_pointwise_align_weight = loss_pointwise_align_weight
+        self.pointwise_align_type = pointwise_align_type
 
         self.use_semantic_align = use_semantic_align
         self.loss_semantic_align_weight = loss_semantic_align_weight
@@ -419,13 +421,48 @@ class NeRFOccPretrainHead(BaseModule):
 
         if self.use_pointwise_align:
             ## compute the temporal pointwise align loss
-            # loss_semantic_align_pointwise = F.mse_loss(
-            #     semantic_pred1, semantic_pred2)
-            
-            loss_semantic_align_pointwise = cross_modality_contrastive_loss(
-                semantic_pred1, semantic_pred2
-            )
+            if self.pointwise_align_type == 'mse':
+                loss_semantic_align_pointwise = F.mse_loss(
+                    semantic_pred1, semantic_pred2)
+            elif self.pointwise_align_type == 'contrastive':
+                bs, num_cam, h, w = render_mask1.shape
+                start, end = 0, 0
 
+                batched_loss = []
+                for i in range(bs):
+                    all_camera_contrast_loss = []
+                    for j in range(num_cam):
+                        curr_render_mask1 = render_mask1[i, j]  # (h, w)
+                        curr_render_mask2 = render_mask2[i, j]
+
+                        num_valid_pts = int(curr_render_mask1.sum())
+                        if num_valid_pts == 0:
+                            continue
+
+                        end += num_valid_pts
+
+                        curr_semantic_pred1 = semantic_pred1[start:end]  # (num_sample_points, C)
+                        curr_semantic_pred2 = semantic_pred2[start:end]  # (num_sample_points, C)
+
+                        loss_curr_pw_align = cross_modality_contrastive_loss(
+                            curr_semantic_pred1, curr_semantic_pred2
+                        )
+                        if torch.isnan(loss_curr_pw_align):
+                            print("NaN loss_curr_pw_align")
+                            import ipdb
+                            ipdb.set_trace()
+
+                        all_camera_contrast_loss.append(loss_curr_pw_align)
+
+                        start = end
+                    
+                    batched_loss.append(torch.stack(all_camera_contrast_loss, dim=0).mean())
+                
+                loss_semantic_align_pointwise = torch.stack(batched_loss, dim=0).mean()
+                
+            else:
+                raise NotImplementedError()
+            
             losses['loss_pointwise_align'] = \
                 loss_semantic_align_pointwise * self.loss_pointwise_align_weight
             

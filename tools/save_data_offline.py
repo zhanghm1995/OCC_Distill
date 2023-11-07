@@ -320,6 +320,7 @@ def save_point_flow_cat_images(save_root):
         save_root (str): the save root.
     """
     anno_file = "data/nuscenes/bevdetv3-lidarseg-nuscenes_infos_val.pkl"
+    anno_file = "data/nuscenes/bevdetv3-lidarseg-nuscenes_infos_train.pkl"
 
     data_root = "./data/nuscenes/nuscenes_scene_sequence_npz"
 
@@ -340,8 +341,6 @@ def save_point_flow_cat_images(save_root):
     for idx, info in tqdm(enumerate(data_infos), total=len(data_infos)):
         cam_infos = info['cams']
 
-        cam_imgs1 = load_images(cam_infos, cam_names, cam_img_size)
-
         scene_token = info['scene_token']
         sample_token = info['token']
 
@@ -351,6 +350,12 @@ def save_point_flow_cat_images(save_root):
         next_scene_token = next_info['scene_token']
         next_sample_token = next_info['token']
 
+        # if scene_token != '2ffd7e2a1daf4b928464ddb2ed3dca59' or \
+        #    sample_token != '6167ea2d40eb44299567f1fbdd439208' or \
+        #    next_sample_token != '7e1d33736acc4c599083bf226e917eff':
+        #     continue
+
+        cam_imgs1 = load_images(cam_infos, cam_names, cam_img_size)
         cam_imgs2 = load_images(next_info['cams'], cam_names, cam_img_size)
         
         if scene_token != next_scene_token:
@@ -748,8 +753,8 @@ def save_scene_sequence_image(anno_file):
 if __name__ == "__main__":
     # visualize_sam_mask(save_root="./results/cvpr_flow_points_cat")
 
-    visualize_linked_sam_mask(save_root="./results/cvpr_flow_points_cat")
-    exit(0)
+    # visualize_linked_sam_mask(save_root="./results/cvpr_flow_points_cat")
+    # exit(0)
 
     save_point_flow_cat_images(save_root="./results/cvpr_flow_points_cat")
     exit(0)

@@ -128,39 +128,79 @@ def load_data():
 
 
 def check_nuscene_flow_data():
-    nuscene_flow_dir = "data/nuscenes_scene_sequence"
+    nuscene_flow_dir = "data/nuscenes/nuscenes_scene_sequence_npz"
     all_dirs = os.listdir(nuscene_flow_dir)
 
     print(len(all_dirs))
     
-    all_files_length = []
-    for dir in tqdm(all_dirs):
-        dir_path = osp.join(nuscene_flow_dir, dir)
-        all_files = os.listdir(dir_path)
-        all_files_length.append(len(all_files))
-    
-    print(np.sum(all_files_length))
-
     ## read the pickle data
     all_data = []
     start = time.time()
+
     for dir in tqdm(all_dirs):
         dir_path = osp.join(nuscene_flow_dir, dir)
         all_files = os.listdir(dir_path)
         for file in all_files:
             file_path = osp.join(dir_path, file)
-            try:
-                with open(file_path, 'rb') as f:
-                    scene_flow_dict = pickle.load(f)
-                all_data.append(scene_flow_dict)
-            except:
-                print(file_path)
+            if not file_path.endswith(".npz"):
+                continue
+            scene_flow_data = np.load(file_path)
+            coord1 = scene_flow_data['coord1']  # (6, N, 2)
+            coord2 = scene_flow_data['coord2']
+
+            num_valid_points = np.array([int(entry[-1, 0]) for entry in coord1])
+            if np.any(num_valid_points < 1):
+                print(file_path, num_valid_points)
+
     end = time.time()
     print("Data time:", end - start)
 
-    save_path = osp.join('results/', "scene_data.pkl")
-    with open(save_path, 'wb') as f:
-        pickle.dump(all_data, f)
+
+def check_nuscene_flow_valid_points():
+    nuscene_flow_dir = "data/nuscenes/nuscenes_scene_sequence_npz"
+
+    anno_file = "data/nuscenes/bevdetv3-inst-nuscenes_infos_train.pkl"
+    # anno_file = "data/nuscenes/bevdetv3-inst-nuscenes_infos_val.pkl"
+    # 1) load the dataset pickle file
+    with open(anno_file, "rb") as fp:
+        dataset = pickle.load(fp)
+    
+    data_infos = dataset['infos']
+    data_infos = list(sorted(data_infos, key=lambda e: e['timestamp']))
+    print(f"Total length of data infos: {len(data_infos)}")
+
+    for idx in range(len(data_infos)):
+        temporal_interval = 1
+        if np.random.choice([0, 1]):
+            temporal_interval *= -1
+        
+        select_idx = idx + temporal_interval
+        select_idx = np.clip(select_idx, 0, len(data_infos) - 1)
+
+        curr = data_infos[idx]
+        other = data_infos[select_idx]
+
+        if data_infos[select_idx]['token'] == data_infos[idx]['token'] or \
+            data_infos[select_idx]['scene_token'] != data_infos[idx]['scene_token']:
+            continue
+            
+        scene_token = curr['scene_token']
+        sample_token1 = curr['token']
+        sample_token2 = other['token']
+        
+        scene_flow_fp = osp.join("./data/nuscenes/nuscenes_scene_sequence_npz",
+                                     scene_token, 
+                                     sample_token1 + "_" + sample_token2 + ".npz")
+        
+        scene_flow_data = np.load(scene_flow_fp)
+        coord1 = scene_flow_data['coord1']  # (6, N, 2)
+        coord2 = scene_flow_data['coord2']
+
+        num_valid_points = np.array([int(entry[-1, 0]) for entry in coord1])
+        if np.any(num_valid_points < 1):
+            print(scene_flow_fp, num_valid_points)
+
+
 
 
 def change_file_extensions():
@@ -176,6 +216,9 @@ def change_file_extensions():
 
 
 if __name__ == "__main__":
+    check_nuscene_flow_valid_points()
+    exit()
+
     change_file_extensions()
     exit()
 
