@@ -23,7 +23,7 @@ from ..builder import HEADS
 
 def cross_modality_contrastive_loss(feat1, 
                                     feat2, 
-                                    temperature=1.0):
+                                    temperature=0.07):
     """Compute the contrastive loss between the two features.
 
     Args:
@@ -35,8 +35,8 @@ def cross_modality_contrastive_loss(feat1,
         _type_: _description_
     """
     # Normalize the features
-    # feat1 = F.normalize(feat1, dim=-1)
-    # feat2 = F.normalize(feat2, dim=-1)
+    feat1 = F.normalize(feat1, dim=-1)
+    feat2 = F.normalize(feat2, dim=-1)
 
     # Compute the scalar product between the image features and the point cloud features
     logits = torch.matmul(feat1, feat2.t()) / temperature

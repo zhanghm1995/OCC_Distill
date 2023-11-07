@@ -223,7 +223,7 @@ test_data_config = dict(
     ann_file=data_root + 'bevdetv3-lidarseg-nuscenes_infos_val.pkl')
 
 data = dict(
-    samples_per_gpu=4,
+    samples_per_gpu=2,
     workers_per_gpu=6,
     train=dict(
         data_root=data_root,
@@ -250,18 +250,9 @@ lr_config = dict(
     warmup_iters=200,
     warmup_ratio=0.001,
     step=[100,])
-runner = dict(type='EpochBasedRunner', max_epochs=24)
-# evaluation = dict(interval=24, pipeline=test_pipeline)
+runner = dict(type='EpochBasedRunner', max_epochs=12)
 
 checkpoint_config = dict(interval=1, max_keep_ckpts=10)
-
-# custom_hooks = [
-#     dict(
-#         type='MEGVIIEMAHook',
-#         init_updates=10560,
-#         priority='NORMAL',
-#     ),
-# ]
 
 log_config = dict(
     interval=50,
@@ -269,3 +260,5 @@ log_config = dict(
         dict(type='TextLoggerHook'),
         dict(type='TensorboardLoggerHook')
     ])
+
+load_from = "ckpts/bevdet-r50-4d-stereo-cbgs.pth"
