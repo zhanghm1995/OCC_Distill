@@ -25,7 +25,8 @@ data_config = {
     # 'input_size': (224, 352), # SMALL FOR DEBUG
     'src_size': (900, 1600),
     # 'render_size': (90, 160), # SMALL FOR DEBUG
-    'render_size': (180, 320),
+    # 'render_size': (180, 320),
+    'render_size': (900, 1600),
 
     # Augmentation
     'resize': (-0.06, 0.11),
@@ -261,4 +262,4 @@ log_config = dict(
         dict(type='TensorboardLoggerHook')
     ])
 
-load_from = "ckpts/bevdet-r50-4d-stereo-cbgs.pth"
+# load_from = "ckpts/bevdet-r50-4d-stereo-cbgs.pth"
