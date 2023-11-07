@@ -7,7 +7,7 @@ Email: haimingzhang@link.cuhk.edu.cn
 Description: Pretrain the BEVDet with rendered depth loss.
 '''
 
-_base_ = ['./pretrain-dvgo-nerf-depth-256img-24e.py']
+_base_ = ['./pretrain-dvgo-nerf-depth-256img-12e.py']
 
 model = dict(
     ## the nerf decoder head
