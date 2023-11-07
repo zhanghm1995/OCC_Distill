@@ -1160,7 +1160,7 @@ class BEVStereo4DOCCTemporalNeRFPretrainV3(BEVStereo4DOCCNeRFRretrain):
 
         if self.use_loss_norm:
             for key, value in losses.items():
-                losses[key] = value / value.detach()
+                losses[key] = value / (value.detach() + 1e-5)
 
         return losses
     
