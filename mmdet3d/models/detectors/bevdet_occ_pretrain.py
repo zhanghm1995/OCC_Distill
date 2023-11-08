@@ -979,6 +979,7 @@ class BEVStereo4DOCCTemporalNeRFPretrainV3(BEVStereo4DOCCNeRFRretrain):
                  use_lss_depth_loss=True,
                  use_temporal_align_loss=True,
                  use_loss_norm=False,
+                 use_projector=False,
                  **kwargs):
         
         super(BEVStereo4DOCCTemporalNeRFPretrainV3, self).__init__(
@@ -988,6 +989,7 @@ class BEVStereo4DOCCTemporalNeRFPretrainV3(BEVStereo4DOCCNeRFRretrain):
         self.use_render_depth_loss = use_render_depth_loss
         self.use_temporal_align_loss = use_temporal_align_loss
         self.use_loss_norm = use_loss_norm
+        self.use_projector = use_projector
 
         if pretrain_head is not None:
             self.pretrain_head = builder.build_head(pretrain_head)
@@ -1014,6 +1016,16 @@ class BEVStereo4DOCCTemporalNeRFPretrainV3(BEVStereo4DOCCNeRFRretrain):
                 nn.Softplus(),
                 nn.Linear(self.out_dim*2, 1),
             )
+
+        if self.use_projector:
+            self.projector = ConvModule(
+                self.img_view_transformer.out_channels,
+                self.out_dim,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+                bias=True,
+                conv_cfg=dict(type='Conv3d'))
 
     def reshape_kwargs(self, 
                        batch, 
@@ -1076,6 +1088,9 @@ class BEVStereo4DOCCTemporalNeRFPretrainV3(BEVStereo4DOCCNeRFRretrain):
 
         # predict the density
         density_prob = self.density_mlp(voxel_feats)
+
+        if self.use_projector:
+            voxel_feats = self.projector(img_feats[0]).permute(0, 4, 3, 2, 1)  # to (b, 200, 200, 16, c)
 
         density_prob = rearrange(density_prob, 'b x y z c -> b c x y z')
         voxel_feats = rearrange(voxel_feats, 'b x y z c -> b c x y z')
