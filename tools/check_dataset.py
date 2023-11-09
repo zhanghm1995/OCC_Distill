@@ -189,8 +189,8 @@ def check_nuscene_flow_valid_points():
         sample_token2 = other['token']
         
         scene_flow_fp = osp.join("./data/nuscenes/nuscenes_scene_sequence_npz",
-                                     scene_token, 
-                                     sample_token1 + "_" + sample_token2 + ".npz")
+                                 scene_token, 
+                                 sample_token1 + "_" + sample_token2 + ".npz")
         
         scene_flow_data = np.load(scene_flow_fp)
         coord1 = scene_flow_data['coord1']  # (6, N, 2)
@@ -198,7 +198,7 @@ def check_nuscene_flow_valid_points():
 
         num_valid_points = np.array([int(entry[-1, 0]) for entry in coord1])
         if np.any(num_valid_points < 1):
-            print(scene_flow_fp, num_valid_points)
+            print(scene_flow_fp, num_valid_points, idx, select_idx, temporal_interval)
 
 
 
