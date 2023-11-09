@@ -232,3 +232,150 @@ class NuScenesDatasetOccPretrain(NuScenesDatasetOccpancy):
             sample_pts_pad2[idx][max_num_sample_pts - 1] = num_points
 
         return sample_pts_pad1, sample_pts_pad2
+
+
+@DATASETS.register_module()
+class NuScenesDatasetOccPretrainV2(NuScenesDatasetOccpancy):
+
+    def __getitem__(self, idx):
+        """Get item from infos according to the given index.
+
+        Returns:
+            dict: Data dictionary of the corresponding index.
+        """
+        if self.test_mode:
+            return self.prepare_test_data(idx)
+        
+        while True:
+            idx1 = idx  # the first frame
+
+            # select the neiborhood frame
+            temporal_interval = 1
+            if np.random.choice([0, 1]):
+                temporal_interval *= -1
+
+            idx2 = idx1 + temporal_interval
+            idx2 = np.clip(idx2, 0, len(self) - 1)
+            if self.data_infos[idx2]['token'] == self.data_infos[idx1]['token'] or \
+                self.data_infos[idx2]['scene_token'] != self.data_infos[idx1]['scene_token']:
+                idx = self._rand_another(idx)
+                continue
+            
+            ## start loading data
+            output = []
+            data1 = self.prepare_train_data(idx1)
+            output.append(data1)
+            
+            data2 = self.prepare_train_data(idx2)
+            output.append(data2)
+
+            if any([x is None for x in output]):
+                idx = self._rand_another(idx)
+                continue
+
+            # load the scene flow
+            scene_token = self.data_infos[idx]['scene_token']
+            sample_token1 = data1['img_metas'].data['sample_idx']
+            sample_token2 = data2['img_metas'].data['sample_idx']
+
+            scene_flow_fp = osp.join("./data/nuscenes/nuscenes_scene_sequence_npz",
+                                     scene_token, 
+                                     sample_token1 + "_" + sample_token2 + ".npz")
+            
+            scene_flow_dict = np.load(scene_flow_fp)
+            sample_pts_pad1 = scene_flow_dict['coord1']  # (n_cam, n_points, 2)
+            sample_pts_pad2 = scene_flow_dict['coord2']
+
+            render_size = data1['render_gt_depth'].shape[-2:]  # (h, w)
+            origin_h, origin_w = 900, 1600
+            height, width = render_size
+
+            # need add processing when not using (900, 1600) render size
+            # and please note that the last dimension is the number of points
+            if height != origin_h or width != origin_w:
+                scale_h, scale_w = height / origin_h, width / origin_w
+                
+                num_valid_pts_arr1 = sample_pts_pad1[:, -1, :].copy()
+                num_valid_pts_arr2 = sample_pts_pad2[:, -1, :].copy()
+
+                sample_pts_pad1 *= np.array([scale_w, scale_h])
+                sample_pts_pad2 *= np.array([scale_w, scale_h])
+
+                sample_pts_pad1[:, -1, :] = num_valid_pts_arr1
+                sample_pts_pad2[:, -1, :] = num_valid_pts_arr2
+            
+            sample_pts_pad1, sample_pts_pad2 = self.assign_instance_id(
+                data1, sample_pts_pad1, sample_pts_pad2)
+
+            output[0]['sample_pts_pad'] = torch.from_numpy(sample_pts_pad1).to(torch.long)
+            output[1]['sample_pts_pad'] = torch.from_numpy(sample_pts_pad2).to(torch.long)
+
+            # collate these two frames together
+            res = collate(output, samples_per_gpu=1)
+
+            # end = time.time()
+            # print("Data time:", end - start)
+
+            return res
+
+    def assign_instance_id(self, 
+                           base_data, 
+                           sample_pts_pad1, 
+                           sample_pts_pad2):
+        """Assign the instance id for the paired points.
+        """
+
+        if 'instance_masks' not in base_data:
+            return sample_pts_pad1, sample_pts_pad2
+        
+        min_num_instance_pixels = 10
+        
+        instance_mask = base_data['instance_masks'].numpy()  # (n_cam, h, w)
+        num_cam = instance_mask.shape[0]
+
+        all_cams_sample_pts_list1 = []
+        all_cams_sample_pts_list2 = []
+        for i in range(num_cam):
+            sample_pts1 = sample_pts_pad1[i]  # (n_points, 2)
+            sample_pts2 = sample_pts_pad2[i]
+            
+            num_valid_pts = int(sample_pts1[-1, 0])
+            curr_sample_pts1 = sample_pts1[:num_valid_pts]
+            curr_sample_pts2 = sample_pts2[:num_valid_pts]
+
+            curr_instance_mask = instance_mask[i]  # (h, w)
+
+            # fiter the instances which have fewer pixels
+            origin_unique_inst, origin_count = np.unique(curr_instance_mask, return_counts=True)
+            origin_unique_inst = origin_unique_inst[origin_count > min_num_instance_pixels]
+            
+            sampled_instance_mask1 = curr_instance_mask[curr_sample_pts1[:, 1].astype(np.int64), 
+                                                        curr_sample_pts1[:, 0].astype(np.int64)]  # (N,)
+            sampled_unique_inst1 = np.unique(sampled_instance_mask1)
+            valid_sampled_unique_inst1 = np.intersect1d(sampled_unique_inst1, origin_unique_inst)
+
+            sampled_instance_mask1[np.isin(sampled_instance_mask1, 
+                                           valid_sampled_unique_inst1, 
+                                           invert=True)] = -1
+            
+            sample_pts_inst1 = np.concatenate([curr_sample_pts1, sampled_instance_mask1[:, None]], axis=1)
+            sample_pts_inst2 = np.concatenate([curr_sample_pts2, sampled_instance_mask1[:, None]], axis=1)
+
+            ## padding to the same length
+            final_sample_pts1 = np.zeros((sample_pts1.shape[0], 3)).astype(sample_pts1.dtype)
+            final_sample_pts2 = np.zeros((sample_pts2.shape[0], 3)).astype(sample_pts2.dtype)
+
+            final_sample_pts1[:num_valid_pts] = sample_pts_inst1
+            final_sample_pts2[:num_valid_pts] = sample_pts_inst2
+
+            final_sample_pts1[-1, :] = num_valid_pts
+            final_sample_pts2[-1, :] = num_valid_pts
+            
+            all_cams_sample_pts_list1.append(final_sample_pts1)
+            all_cams_sample_pts_list2.append(final_sample_pts2)
+
+        all_cams_sample_pts_inst1 = np.stack(all_cams_sample_pts_list1, axis=0)
+        all_cams_sample_pts_inst2 = np.stack(all_cams_sample_pts_list2, axis=0)
+        
+        return all_cams_sample_pts_inst1, all_cams_sample_pts_inst2
+
