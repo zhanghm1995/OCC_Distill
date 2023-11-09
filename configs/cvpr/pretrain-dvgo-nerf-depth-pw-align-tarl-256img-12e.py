@@ -55,12 +55,14 @@ model = dict(
     use_temporal_align_loss=False,
     use_render_depth_loss=True,
 
+    use_projector=True,
+
     align_after_view_transfromation=False,
     num_adj=len(range(*multi_adj_frame_id_cfg)),
 
     pretrain_head=dict(
         type='RenderContrastHead',
-        use_semantic_align=True, 
+        use_semantic_align=False, 
         use_pointwise_align=True,
         pointwise_align_type='contrastive',
         loss_pointwise_align_weight=0.1
