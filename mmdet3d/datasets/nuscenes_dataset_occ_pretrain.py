@@ -310,11 +310,14 @@ class NuScenesDatasetOccPretrainV2(NuScenesDatasetOccpancy):
             output[0]['sample_pts_pad'] = torch.from_numpy(sample_pts_pad1).to(torch.long)
             output[1]['sample_pts_pad'] = torch.from_numpy(sample_pts_pad2).to(torch.long)
 
+            ## we don't need the instance masks, render_gt_img in fact
+            output[0].pop('instance_masks')
+            output[0].pop('render_gt_img')
+            output[1].pop('instance_masks')
+            output[1].pop('render_gt_img')
+
             # collate these two frames together
             res = collate(output, samples_per_gpu=1)
-
-            # end = time.time()
-            # print("Data time:", end - start)
 
             return res
 
@@ -324,7 +327,8 @@ class NuScenesDatasetOccPretrainV2(NuScenesDatasetOccpancy):
                            sample_pts_pad2):
         """Assign the instance id for the paired points.
         """
-
+        import time
+        start1 = time.time()
         if 'instance_masks' not in base_data:
             return sample_pts_pad1, sample_pts_pad2
         

@@ -1196,8 +1196,6 @@ class BEVStereo4DOCCTemporalNeRFPretrainV3(BEVStereo4DOCCNeRFRretrain):
             for j in range(num_cam):
                 num_valid_pts = sample_pts_pad[i, j, -1, 0]
                 curr_sample_pts = sample_pts_pad[i, j, :num_valid_pts]
-                # print(i, j, num_valid_pts, curr_sample_pts[:, 0].min(), curr_sample_pts[:, 0].max())
-                # print(i, j, num_valid_pts, curr_sample_pts[:, 1].min(), curr_sample_pts[:, 1].max())
                 
                 render_mask[i, j][curr_sample_pts[:, 1], curr_sample_pts[:, 0]] = 1
 
