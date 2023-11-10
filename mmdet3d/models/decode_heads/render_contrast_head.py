@@ -327,7 +327,7 @@ class RenderContrastHead(BaseModule):
                                                             target_attn[~pad_masks])
 
                     if torch.isnan(loss_curr_pw_align):
-                        print("NaN loss_curr_pw_align")
+                        print("[WARNING] NaN in loss_curr_pw_align")
                         print(torch.isnan(pred_attn).sum())
                         print(torch.isnan(target_attn).sum())
 
