@@ -1132,13 +1132,14 @@ class BEVStereo4DOCCTemporalNeRFPretrainV3(BEVStereo4DOCCNeRFRretrain):
                     loss_render_depth = loss_lss_depth
                 losses['loss_render_depth'] = loss_render_depth
 
-            feats_dict = dict()
-            feats_dict['render_semantic'] = semantic_pred
-            feats_dict['render_mask'] = render_mask
+            if self.use_temporal_align_loss:
+                feats_dict = dict()
+                feats_dict['render_semantic'] = semantic_pred
+                feats_dict['render_mask'] = render_mask
 
-            loss_contrast_dict = self.pretrain_head.loss_with_render_mask(
-                feats_dict, rand_view_idx=rand_ind, **kwargs)
-            losses.update(loss_contrast_dict)
+                loss_contrast_dict = self.pretrain_head.loss_with_render_mask(
+                    feats_dict, rand_view_idx=rand_ind, **kwargs)
+                losses.update(loss_contrast_dict)
             
         else:  # rendering the whole images
             ## Rendering
