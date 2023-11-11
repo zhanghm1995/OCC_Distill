@@ -941,9 +941,206 @@ class BEVStereo4DOCCTemporalNeRFPretrainV2(BEVStereo4DOCCNeRFRretrain):
                 current_frame_img = repeat(current_frame_img, 'n h w-> n h w c', c=3).contiguous()
                 current_frame_img = current_frame_img.permute(0, 3, 1, 2).cpu().numpy()
                 
-                self.NeRFDecoder.visualize_image_and_render_depth_pair(
+                self.NeRFDecoder.visualize_image_depth_pair(
                     current_frame_img, 
-                    render_depth[0], 
+                    render_gt_depth[0], 
+                    render_depth[0])
+                exit()
+
+            ## Compute nerf losses
+            if self.use_render_depth_loss:
+                loss_render_depth = self.NeRFDecoder.compute_depth_loss(
+                    render_depth, render_gt_depth, render_gt_depth > 0.0)
+                if torch.isnan(loss_render_depth):
+                    print('NaN in DepthNeRF loss!')
+                    loss_render_depth = loss_lss_depth
+                losses['loss_render_depth'] = loss_render_depth
+
+            if self.use_temporal_align_loss:
+                feats_dict = dict()
+                feats_dict['render_semantic'] = semantic_pred
+
+                start = time.time()
+                loss_contrast_dict = self.pretrain_head.loss(
+                    feats_dict, rand_view_idx=rand_ind, **kwargs)
+                losses.update(loss_contrast_dict)
+                end = time.time()
+                print("Computing loss time:", end - start)
+
+        return losses
+    
+
+@DETECTORS.register_module()
+class BEVStereo4DOCCTemporalNeRFPretrainV2Origin(BEVStereo4DOCC):
+    """Using the temporal alignment strategy to pretrain the Occupancy models.
+    In this version, we use the volume rendering to compute the depth loss.
+
+    Args:
+        BEVStereo4DOCCTemporalNeRFPretrainV2Origin (_type_): _description_
+    """
+
+    def __init__(self,
+                 nerf_head=None,
+                 pretrain_head=None,
+                 use_render_depth_loss=True,
+                 use_lss_depth_loss=True,
+                 use_temporal_align_loss=True,
+                 **kwargs):
+        
+        super(BEVStereo4DOCCTemporalNeRFPretrainV2Origin, self).__init__(**kwargs)
+
+        self.use_lss_depth_loss = use_lss_depth_loss
+        self.use_render_depth_loss = use_render_depth_loss
+        self.use_temporal_align_loss = use_temporal_align_loss
+
+        self.NeRFDecoder = builder.build_backbone(nerf_head)
+
+        if pretrain_head is not None:
+            self.pretrain_head = builder.build_head(pretrain_head)
+
+        self.num_random_view = self.NeRFDecoder.num_random_view
+
+    @staticmethod
+    def inverse_flip_aug(feat, flip_dx, flip_dy):
+        batch_size = feat.shape[0]
+        feat_flip = []
+        for b in range(batch_size):
+            flip_flag_x = flip_dx[b]
+            flip_flag_y = flip_dy[b]
+            tmp = feat[b]
+            if flip_flag_x:
+                tmp = tmp.flip(1)
+            if flip_flag_y:
+                tmp = tmp.flip(2)
+            feat_flip.append(tmp)
+        feat_flip = torch.stack(feat_flip)
+        return feat_flip
+    
+    def reshape_kwargs(self, 
+                       batch, 
+                       keep_keys=['instance_selected_points']):
+        output = {}
+        for key, value in batch.items():
+            if key in keep_keys:
+                output[key] = value
+                continue
+            
+            if len(value.shape) == 2:
+                output[key] = value.view(-1)
+            else:
+                output[key] = value.view(-1, *value.shape[2:])
+        return output
+
+    def forward_train(self,
+                      points=None,
+                      img_metas=None,
+                      img_inputs=None,
+                      **kwargs):
+        """Forward training function.
+
+        Returns:
+            dict: Losses of different branches.
+        """
+        if img_inputs[0].dim() == 6:
+            img_inputs_new = []
+            for entry in img_inputs:
+                entry = entry.view(-1, *entry.shape[2:])
+                img_inputs_new.append(entry)
+            img_inputs = img_inputs_new
+
+            kwargs = self.reshape_kwargs(kwargs)
+        
+        img_feats, _, depth = self.extract_feat(
+            points, img=img_inputs, img_metas=img_metas, **kwargs)
+        
+        # occupancy prediction
+        occ_pred = self.final_conv(img_feats[0]).permute(0, 4, 3, 2, 1)  # to (b, 200, 200, 16, c)
+        if self.use_predicter:
+            occ_pred = self.predicter(occ_pred)
+        
+        ## Compute the losses
+        losses = dict()
+        if self.use_lss_depth_loss:
+            gt_depth = kwargs['gt_depth']
+            loss_lss_depth = self.img_view_transformer.get_depth_loss(gt_depth, depth)
+            losses['loss_lss_depth'] = loss_lss_depth
+        
+        render_gt_depth = kwargs['render_gt_depth']  # [B, num_cam, H, W]
+
+        # predict the density
+        occ_pred = rearrange(occ_pred, 'b x y z c -> b c x y z')
+
+        density_prob = -occ_pred[:, self.NeRFDecoder.semantic_dim:self.NeRFDecoder.semantic_dim+1, ...]
+
+        # semantic
+        if self.NeRFDecoder.semantic_head:
+            semantic = occ_pred[:, :self.NeRFDecoder.semantic_dim]
+        else:
+            semantic = torch.zeros_like(occ_pred)[:, :self.NeRFDecoder.semantic_dim]
+
+        # image reconstruction
+        if self.NeRFDecoder.img_recon_head:
+            rgb_recons = occ_pred[:, -4:-1]
+        else:
+            rgb_recons = torch.zeros_like(density_prob)
+
+        # cancel the effect of flip augmentation
+        intricics = kwargs['intricics']
+        pose_spatial = kwargs['pose_spatial']
+        flip_dx, flip_dy = kwargs['flip_dx'], kwargs['flip_dy']
+        
+        rgb_flip = self.inverse_flip_aug(rgb_recons, flip_dx, flip_dy)
+        semantic_flip = self.inverse_flip_aug(semantic, flip_dx, flip_dy)
+        density_prob_flip = self.inverse_flip_aug(density_prob, flip_dx, flip_dy)
+
+        # random view selection
+        rand_ind = None
+        if self.num_random_view != -1:
+            rand_ind = torch.multinomial(
+                torch.tensor([1 / self.num_random_view] * 6), 
+                self.num_random_view, 
+                replacement=False)
+            intricics = intricics[:, rand_ind]
+            pose_spatial = pose_spatial[:, rand_ind]
+            render_gt_depth = render_gt_depth[:, rand_ind]
+
+        # rendering
+        if self.NeRFDecoder.mask_render:
+            render_mask = render_gt_depth > 0.0  # (b, num_cam, h, w)
+            render_depth, rgb_pred, semantic_pred = self.NeRFDecoder(
+                density_prob_flip, rgb_flip, semantic_flip, 
+                intricics, pose_spatial, True, render_mask)
+            
+            if self.use_render_depth_loss:
+                render_gt_depth = render_gt_depth[render_mask]
+                loss_nerf = self.NeRFDecoder.compute_depth_loss(
+                    render_depth, render_gt_depth, render_gt_depth > 0.0)
+                if torch.isnan(loss_nerf):
+                    print('NaN in DepthNeRF loss!')
+                    loss_nerf = loss_lss_depth
+                losses['loss_nerf'] = loss_nerf
+            
+        else:  # rendering the whole images
+            ## Rendering
+            import time
+            torch.cuda.synchronize()
+            start = time.time()
+            render_depth, rgb_pred, semantic_pred = self.NeRFDecoder(
+                density_prob_flip, rgb_flip, semantic_flip, 
+                intricics, pose_spatial, True)
+            end = time.time()
+            print("Rendering time:", end - start)
+
+            VISUALIZE = True
+            if VISUALIZE:
+                current_frame_img = torch.zeros_like(render_depth[0])  # (num_cam, h, w)
+                # repeat to (num_cam, 3, h, w)
+                current_frame_img = repeat(current_frame_img, 'n h w-> n h w c', c=3).contiguous()
+                current_frame_img = current_frame_img.permute(0, 3, 1, 2).cpu().numpy()
+                
+                self.NeRFDecoder.visualize_image_depth_pair(
+                    current_frame_img, 
+                    render_gt_depth[0], 
                     render_depth[0])
                 exit()
 

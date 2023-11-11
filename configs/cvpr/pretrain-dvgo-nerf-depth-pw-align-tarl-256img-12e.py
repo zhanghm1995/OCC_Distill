@@ -52,7 +52,7 @@ multi_adj_frame_id_cfg = (1, 1 + 1, 1)
 
 model = dict(
     type='BEVStereo4DOCCTemporalNeRFPretrainV3',
-    use_temporal_align_loss=False,
+    use_temporal_align_loss=True,
     use_render_depth_loss=True,
 
     use_projector=True,
@@ -185,7 +185,7 @@ train_pipeline = [
     dict(
         type='Collect3D', keys=['img_inputs', 'gt_depth', 
                                 'render_gt_depth', 'instance_masks',
-                                'render_gt_img',
+                                # 'render_gt_img',
                                 'intricics', 'pose_spatial', 
                                 'flip_dx', 'flip_dy'])
 ]
