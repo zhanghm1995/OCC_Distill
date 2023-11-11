@@ -320,14 +320,16 @@ class RenderContrastHead(BaseModule):
                         target_attn = torch.arange(
                             pred_attn.shape[0], device=seg_feats1.device).unsqueeze(-1).expand(
                                 pred_attn.shape[0], pred_attn.shape[1])
+                        
+                        pred_attn = torch.nan_to_num(pred_attn)
+                        target_attn = torch.nan_to_num(target_attn)
+
                         # remove the padded values (zeros) to compute the loss
                         loss_curr_pw_align = F.cross_entropy(pred_attn[~pad_masks], 
                                                              target_attn[~pad_masks])
 
                         if torch.isnan(loss_curr_pw_align):
                             print("NaN loss_curr_pw_align")
-                            import ipdb
-                            ipdb.set_trace()
 
                         all_camera_contrast_loss.append(loss_curr_pw_align)
 
