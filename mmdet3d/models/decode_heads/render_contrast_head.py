@@ -245,6 +245,9 @@ class RenderContrastHead(BaseModule):
         """
         losses = dict()
 
+        if not (self.use_pointwise_align or self.use_semantic_align):
+            return losses
+
         assert 'render_semantic' in input_dict
         assert 'sample_pts_pad' in kwargs
 
@@ -275,159 +278,97 @@ class RenderContrastHead(BaseModule):
         semantic_pred1 = semantic_pred[:num_frame_pixels]
         semantic_pred2 = semantic_pred[num_frame_pixels:]
 
-        if self.use_pointwise_align and self.pointwise_align_type != 'similarity':
-            ## compute the temporal pointwise align loss
-            if self.pointwise_align_type == 'mse':
-                loss_semantic_align_pointwise = F.mse_loss(
-                    semantic_pred1, semantic_pred2)
-            elif self.pointwise_align_type == 'contrastive':
-                bs, num_cam, h, w = render_mask1.shape
-                start, end = 0, 0
+    
+        ## compute the temporal pointwise align loss
+        bs, num_cam, h, w = render_mask1.shape
+        start, end = 0, 0
 
-                batched_loss = []
-                for i in range(bs):
-                    all_camera_contrast_loss = []
-                    for j in range(num_cam):
-                        curr_sample_pts_1 = sample_pts1[i, j]  # (N, 2)
-                        curr_sample_pts_2 = sample_pts2[i, j]
+        batched_pw_loss = []
+        batched_inst_loss = []
+        for i in range(bs):
+            all_camera_pw_loss = []
+            all_camera_inst_loss = []
+            for j in range(num_cam):
+                curr_sample_pts_1 = sample_pts1[i, j]  # (N, 2)
+                curr_sample_pts_2 = sample_pts2[i, j]
 
-                        num_valid_pts = int(curr_sample_pts_1[-1, 0])
-                        if num_valid_pts == 0:
-                            continue
+                num_valid_pts = int(curr_sample_pts_1[-1, 0])
+                if num_valid_pts == 0:
+                    continue
 
-                        end += num_valid_pts
+                end += num_valid_pts
 
-                        curr_sample_pts_1 = curr_sample_pts_1[:num_valid_pts]
-                        curr_sample_pts_2 = curr_sample_pts_2[:num_valid_pts]
+                curr_sample_pts_1 = curr_sample_pts_1[:num_valid_pts]
+                curr_sample_pts_2 = curr_sample_pts_2[:num_valid_pts]
 
-                        curr_semantic_pred1 = semantic_pred1[start:end]  # (num_sample_points, C)
-                        curr_semantic_pred2 = semantic_pred2[start:end]  # (num_sample_points, C)
+                curr_semantic_pred1 = semantic_pred1[start:end]  # (num_sample_points, C)
+                curr_semantic_pred2 = semantic_pred2[start:end]  # (num_sample_points, C)
 
-                        seg_feats1 = list_segments_points(curr_semantic_pred1,
+                seg_feats1 = list_segments_points(curr_semantic_pred1,
+                                                    curr_sample_pts_1[:,  -1:].cpu().numpy(),
+                                                    sample_points=300)
+                seg_feats2 = list_segments_points(curr_semantic_pred2,
+                                                    curr_sample_pts_2[:,  -1:].cpu().numpy(),
+                                                    sample_points=300,
+                                                    avg_feats=True)
+                # seg_feats2 shape is num_clusters x feat_dim
+                seg_feats2 = torch.vstack(seg_feats2)  # (N, C)
+                
+                seg_feats1, pad_masks = pad_batch(seg_feats1)
+
+                if self.use_pointwise_align:
+                    pred_attn = temperature_cosine_sim(seg_feats1, seg_feats2, T=0.1)
+                    # define the target segments for each point
+                    target_attn = torch.arange(
+                        pred_attn.shape[0], device=seg_feats1.device).unsqueeze(-1).expand(
+                            pred_attn.shape[0], pred_attn.shape[1])
+                    # remove the padded values (zeros) to compute the loss
+                    loss_curr_pw_align = F.cross_entropy(pred_attn[~pad_masks], 
+                                                            target_attn[~pad_masks])
+
+                    if torch.isnan(loss_curr_pw_align):
+                        print("[WARNING] NaN in loss_curr_pw_align")
+                        print(torch.isnan(pred_attn).sum())
+                        print(torch.isnan(target_attn).sum())
+
+                    all_camera_pw_loss.append(loss_curr_pw_align)
+
+                if self.use_semantic_align:
+                    ## compute the average features for each instance
+                    seg_feats1_avg = list_segments_points(curr_semantic_pred1,
                                                           curr_sample_pts_1[:,  -1:].cpu().numpy(),
-                                                          sample_points=300)
-                        seg_feats2 = list_segments_points(curr_semantic_pred2,
-                                                          curr_sample_pts_2[:,  -1:].cpu().numpy(),
                                                           sample_points=300,
                                                           avg_feats=True)
-                        # seg_feats2 shape is num_clusters x feat_dim
-                        seg_feats2 = torch.vstack(seg_feats2)
-                        
-                        seg_feats1, pad_masks = pad_batch(seg_feats1)
+                    seg_feats1_avg = torch.vstack(seg_feats1_avg)  # (N, C)
 
-                        pred_attn = temperature_cosine_sim(seg_feats1, seg_feats2, T=0.1)
-                        # define the target segments for each point
-                        target_attn = torch.arange(
-                            pred_attn.shape[0], device=seg_feats1.device).unsqueeze(-1).expand(
-                                pred_attn.shape[0], pred_attn.shape[1])
-                        
-                        pred_attn = torch.nan_to_num(pred_attn)
-                        target_attn = torch.nan_to_num(target_attn)
+                    inst_attn = temperature_cosine_sim(seg_feats1_avg,
+                                                       seg_feats2,
+                                                       T=0.1)  # (S, S)
+                    # define the target segments for each point
+                    target_attn = torch.arange(
+                        inst_attn.shape[0], device=seg_feats1_avg.device)
+                    loss_curr_semantic_align = F.cross_entropy(inst_attn, 
+                                                               target_attn)
+                    all_camera_inst_loss.append(loss_curr_semantic_align)
 
-                        # remove the padded values (zeros) to compute the loss
-                        loss_curr_pw_align = F.cross_entropy(pred_attn[~pad_masks], 
-                                                             target_attn[~pad_masks])
-
-                        if torch.isnan(loss_curr_pw_align):
-                            print("NaN loss_curr_pw_align")
-
-                        all_camera_contrast_loss.append(loss_curr_pw_align)
-
-                        start = end
-                    
-                    batched_loss.append(torch.sum(torch.vstack(all_camera_contrast_loss)))
-                
-                loss_semantic_align_pointwise = torch.stack(batched_loss, dim=0).mean()
-            else:
-                raise NotImplementedError()
+                start = end
             
+            if self.use_pointwise_align:
+                batched_pw_loss.append(torch.sum(torch.vstack(all_camera_pw_loss)))
+
+            if self.use_semantic_align:
+                batched_inst_loss.append(torch.sum(torch.vstack(all_camera_inst_loss)))
+        
+        if self.use_pointwise_align:
+            loss_semantic_align_pointwise = torch.stack(batched_pw_loss, dim=0).mean()
             losses['loss_pointwise_align'] = \
                 loss_semantic_align_pointwise * self.loss_pointwise_align_weight
-            
-        if self.use_semantic_align:
-            assert 'instance_masks' in kwargs
-
-            instance_mask = kwargs['instance_masks']  # (seq*b, num_cam, h, w)
-            sample_pts = kwargs['sample_pts_pad']  # (seq*b, num_cam, N, 2)
-            if rand_view_idx is not None:
-                instance_mask = instance_mask[:, rand_view_idx]
-                sample_pts = sample_pts[:, rand_view_idx]
-            
-            instance_mask = rearrange(instance_mask,
-                                      '(seq b) num_cam h w -> seq b num_cam h w',
-                                      seq=seq_len)
-            sample_pts = rearrange(sample_pts,
-                                    '(seq b) num_cam N uv -> seq b num_cam N uv',
-                                    seq=seq_len)
-            
-            instance_mask1 = instance_mask[0]  # (b, num_cam, h, w)
-            instance_mask2 = instance_mask[1]  # (b, num_cam, h, w)
-
-            sample_pts1 = sample_pts[0]  # (b, num_cam, N, 2)
-            sample_pts2 = sample_pts[1]  # (b, num_cam, N, 2)
-
-            bs, num_cam, h, w = instance_mask1.shape
-            start, end = 0, 0
-
-            batched_loss = []
-            for i in range(bs):
-                all_camera_grouped_feats_1 = []
-                all_camera_grouped_feats_2 = []
-                for j in range(num_cam):
-                    curr_instance_map_1 = instance_mask1[i, j]  # (h, w)
-                    curr_instance_map_2 = instance_mask2[i, j]
-
-                    curr_sample_pts_1 = sample_pts1[i, j]  # (N, 2)
-                    curr_sample_pts_2 = sample_pts2[i, j]
-
-                    num_valid_pts = int(curr_sample_pts_1[-1, 0])
-                    end += num_valid_pts
-
-                    curr_sample_pts_1 = curr_sample_pts_1[:num_valid_pts]
-                    curr_sample_pts_2 = curr_sample_pts_2[:num_valid_pts]
-
-                    # fetch the corresponding instance mask ids
-                    valid_inst_ids1, valid_inst_ids2, selected_pts_indices, final_inst_ids1, final_inst_ids2 = \
-                        self.sample_both_valid_instance(
-                            curr_instance_map_1, curr_sample_pts_1,
-                            curr_instance_map_2, curr_sample_pts_2)
-
-                    curr_render_semantic1 = semantic_pred1[start:end][selected_pts_indices]  # (num_sample_points, C)
-                    curr_render_semantic2 = semantic_pred2[start:end][selected_pts_indices]  # (num_sample_points, C)
-
-                    ## compute the pointwise similarity loss by using the instance ids
-                    # compute_pointwise_similarity_loss(curr_render_semantic1, 
-                    #                                   curr_render_semantic2, 
-                    #                                   final_inst_ids1,
-                    #                                   final_inst_ids2)
-
-                    grouped_semantic1 = scatter_mean(curr_render_semantic1,
-                                                     valid_inst_ids1,
-                                                     dim=0)
-                    grouped_semantic2 = scatter_mean(curr_render_semantic2,
-                                                     valid_inst_ids2,
-                                                     dim=0)
-                    curr_grouped_feats1 = grouped_semantic1[final_inst_ids1]
-                    curr_grouped_feats2 = grouped_semantic2[final_inst_ids2]
-
-                    all_camera_grouped_feats_1.append(curr_grouped_feats1)
-                    all_camera_grouped_feats_2.append(curr_grouped_feats2)
-                    
-                    start = end
-                
-                all_camera_grouped_feats_1 = torch.concat(all_camera_grouped_feats_1, dim=0)[None]
-                all_camera_grouped_feats_2 = torch.concat(all_camera_grouped_feats_2, dim=0)[None]
-                curr_batch_loss = compute_tig_feat_align_loss(
-                    all_camera_grouped_feats_1, all_camera_grouped_feats_2,
-                    loss_inter_instance_weight=self.loss_inter_instance_weight,
-                    loss_inter_channel_weight=self.loss_inter_channel_weight
-                    )
-
-                batched_loss.append(curr_batch_loss)
-            
-            loss_semantic_temporal_align = compute_batched_loss_dict_list(batched_loss)
-            losses.update(loss_semantic_temporal_align)
         
+        if self.use_semantic_align:
+            loss_semantic_align_semantic = torch.stack(batched_inst_loss, dim=0).mean()
+            losses['loss_semantic_align'] = \
+                loss_semantic_align_semantic * self.loss_semantic_align_weight
+            
         return losses
     
     def sample_both_valid_instance(self, 

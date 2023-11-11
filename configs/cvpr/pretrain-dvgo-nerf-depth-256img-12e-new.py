@@ -2,9 +2,9 @@
 Copyright (c) 2023 by Haiming Zhang. All Rights Reserved.
 
 Author: Haiming Zhang
-Date: 2023-10-30 08:58:09
+Date: 2023-11-10 11:01:54
 Email: haimingzhang@link.cuhk.edu.cn
-Description: 
+Description: Pretrain the BEVDet with rendered depth loss in the sequential frame dataset.
 '''
 
 _base_ = ['../_base_/datasets/nus-3d.py', '../_base_/default_runtime.py']
@@ -20,9 +20,10 @@ data_config = {
         'CAM_BACK', 'CAM_BACK_RIGHT'
     ],
     'Ncams':
-    6,
+        6,
     'input_size': (256, 704),
     'src_size': (900, 1600),
+    'render_size': (900, 1600),
 
     # Augmentation
     'resize': (-0.06, 0.11),
@@ -40,18 +41,22 @@ grid_config = {
     'depth': [1.0, 45.0, 0.5],
 }
 
-voxel_size = [0.1, 0.1, 0.2]
+voxel_size = [16, 200, 200]
 
 numC_Trans = 32
 
 multi_adj_frame_id_cfg = (1, 1 + 1, 1)
 
 model = dict(
-    type='BEVStereo4DOCC',
+    type='BEVStereo4DOCCTemporalNeRFPretrainV3',
+    use_temporal_align_loss=False,
+    use_render_depth_loss=True,
+
     align_after_view_transfromation=False,
     num_adj=len(range(*multi_adj_frame_id_cfg)),
     
     img_backbone=dict(
+        pretrained='torchvision://resnet50',
         type='ResNet',
         depth=50,
         num_stages=4,
@@ -68,6 +73,24 @@ model = dict(
         num_outs=1,
         start_level=0,
         out_ids=[0]),
+    ## the nerf decoder head
+    nerf_head=dict(
+        type='NeRFDecoderHead',
+        mask_render=True,
+        img_recon_head=False,
+        semantic_head=True,
+        semantic_dim=17,
+        real_size=grid_config['x'][:2] + grid_config['y'][:2] + grid_config['z'][:2],
+        stepsize=grid_config['depth'][2],
+        voxels_size=voxel_size,
+        mode='bilinear',  # ['bilinear', 'nearest']
+        render_type='DVGO',  # ['prob', 'density', 'DVGO']
+        render_size=data_config['render_size'],
+        depth_range=grid_config['depth'][:2],
+        loss_nerf_weight=1.0,
+        depth_loss_type='silog',  # ['silog', 'l1', 'rl1', 'sml1']
+        variance_focus=0.85,  # only for silog loss
+    ),
     img_view_transformer=dict(
         type='LSSViewTransformerBEVStereo',
         grid_config=grid_config,
@@ -97,19 +120,14 @@ model = dict(
         type='CustomResNet3D',
         numC_input=numC_Trans,
         with_cp=False,
-        num_layer=[1,],
-        num_channels=[numC_Trans,],
-        stride=[1,],
-        backbone_output_ids=[0,]),
-    loss_occ=dict(
-        type='CrossEntropyLoss',
-        use_sigmoid=False,
-        loss_weight=1.0),
-    use_mask=True,
+        num_layer=[1, ],
+        num_channels=[numC_Trans, ],
+        stride=[1, ],
+        backbone_output_ids=[0, ]),
 )
 
 # Data
-dataset_type = 'NuScenesDatasetOccpancy'
+dataset_type = 'NuScenesDatasetOccPretrain'
 data_root = 'data/nuscenes/'
 file_client_args = dict(backend='disk')
 
@@ -117,15 +135,15 @@ bda_aug_conf = dict(
     rot_lim=(-0., 0.),
     scale_lim=(1., 1.),
     flip_dx_ratio=0.5,
-    flip_dy_ratio=0.5)
+    flip_dy_ratio=0.5,
+)
 
 train_pipeline = [
     dict(
-        type='PrepareImageInputs',
+        type='PrepareImageInputsForNeRF',
         is_train=True,
         data_config=data_config,
         sequential=True),
-    dict(type='LoadOccGTFromFile'),
     dict(
         type='LoadAnnotationsBEVDepth',
         bda_aug_conf=bda_aug_conf,
@@ -137,16 +155,24 @@ train_pipeline = [
         load_dim=5,
         use_dim=5,
         file_client_args=file_client_args),
-    dict(type='PointToMultiViewDepth', downsample=1, grid_config=grid_config),
+    dict(
+        type='PointToMultiViewDepthForNeRF', 
+        downsample=1, 
+        grid_config=grid_config, 
+        render_size=data_config['render_size'],
+        render_scale=[data_config['render_size'][0]/data_config['src_size'][0], 
+                      data_config['render_size'][1]/data_config['src_size'][1]]),
     dict(type='DefaultFormatBundle3D', class_names=class_names),
     dict(
-        type='Collect3D', keys=['img_inputs', 'gt_depth', 'voxel_semantics',
-                                'mask_lidar','mask_camera'])
+        type='Collect3D', keys=['img_inputs', 'gt_depth', 
+                                'render_gt_depth',
+                                'intricics', 'pose_spatial', 
+                                'flip_dx', 'flip_dy'])
 ]
 
 test_pipeline = [
     dict(
-        type='PrepareImageInputs', 
+        type='PrepareImageInputsForNeRF', 
         data_config=data_config, 
         sequential=True),
     dict(
@@ -196,11 +222,11 @@ test_data_config = dict(
     ann_file=data_root + 'bevdetv3-lidarseg-nuscenes_infos_val.pkl')
 
 data = dict(
-    samples_per_gpu=4,
+    samples_per_gpu=2,
     workers_per_gpu=6,
     train=dict(
         data_root=data_root,
-        ann_file=data_root + 'bevdetv3-lidarseg-nuscenes_infos_train-quarter.pkl',
+        ann_file=data_root + 'bevdetv3-lidarseg-nuscenes_infos_train.pkl',
         pipeline=train_pipeline,
         classes=class_names,
         test_mode=False,
@@ -215,35 +241,17 @@ for key in ['val', 'train', 'test']:
     data[key].update(share_data_config)
 
 # Optimizer
-optimizer = dict(
-    type='AdamW', 
-    lr=1e-5, 
-    weight_decay=1e-2,
-    paramwise_cfg=dict(
-        custom_keys={
-            'final_conv': dict(lr_mult=10.0),
-            'predicter': dict(lr_mult=10.0),
-        }),)
+optimizer = dict(type='AdamW', lr=1e-4, weight_decay=1e-2)
 optimizer_config = dict(grad_clip=dict(max_norm=5, norm_type=2))
-
-## zhm: the original lr_config is as follows:
 lr_config = dict(
     policy='step',
     warmup='linear',
     warmup_iters=200,
     warmup_ratio=0.001,
     step=[100,])
-runner = dict(type='EpochBasedRunner', max_epochs=24)
+runner = dict(type='EpochBasedRunner', max_epochs=12)
 
 checkpoint_config = dict(interval=1, max_keep_ckpts=10)
-
-custom_hooks = [
-    dict(
-        type='MEGVIIEMAHook',
-        init_updates=10560,
-        priority='NORMAL',
-    ),
-]
 
 log_config = dict(
     interval=50,
@@ -252,4 +260,4 @@ log_config = dict(
         dict(type='TensorboardLoggerHook')
     ])
 
-load_from = 'work_dirs/pretrain-nerf-dvgo-depth-256img-24e/epoch_24.pth'
+# load_from = "ckpts/bevdet-r50-4d-stereo-cbgs.pth"
