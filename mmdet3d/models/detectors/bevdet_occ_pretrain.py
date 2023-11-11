@@ -11,7 +11,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 import numpy as np
-from einops import rearrange
+from einops import rearrange, repeat
 from mmcv.cnn.bricks.conv_module import ConvModule
 from mmdet.models import DETECTORS
 from .. import builder
@@ -314,25 +314,21 @@ class BEVStereo4DOCCNeRFRretrain(BEVStereo4D):
                 render_img_gt = render_img_gt[:, rand_ind]
 
             # rendering
-            # import time
-            # torch.cuda.synchronize()
-            # start = time.time()
             if self.NeRFDecoder.mask_render:
                 render_mask = render_gt_depth > 0.0
                 render_depth, rgb_pred, semantic_pred = self.NeRFDecoder(
                     density_prob_flip, rgb_flip, semantic_flip, 
                     intricics, pose_spatial, True, render_mask)
                 torch.cuda.synchronize()
-                # end = time.time()
-                # print("inference time:", end - start)
-
+                
+                # compute the render depth loss
                 render_gt_depth = render_gt_depth[render_mask]
                 loss_nerf = self.NeRFDecoder.compute_depth_loss(
                     render_depth, render_gt_depth, render_gt_depth > 0.0)
                 if torch.isnan(loss_nerf):
                     print('NaN in DepthNeRF loss!')
                     loss_nerf = loss_depth
-                losses['loss_nerf'] = loss_nerf
+                losses['loss_rendered_depth'] = loss_nerf
 
                 if self.NeRFDecoder.semantic_head:
                     img_semantic = kwargs['img_semantic']
@@ -710,7 +706,7 @@ class BEVStereo4DOCCTemporalNeRFPretrainV2(BEVStereo4DOCCNeRFRretrain):
 
     def __init__(self,
                  pretrain_head=None,
-                 final_softplus=True,
+                 final_softplus=False,
                  use_render_depth_loss=True,
                  use_lss_depth_loss=True,
                  use_temporal_align_loss=True,
@@ -938,6 +934,19 @@ class BEVStereo4DOCCTemporalNeRFPretrainV2(BEVStereo4DOCCNeRFRretrain):
             end = time.time()
             print("Rendering time:", end - start)
 
+            VISUALIZE = True
+            if VISUALIZE:
+                current_frame_img = torch.zeros_like(render_depth[0])  # (num_cam, h, w)
+                # repeat to (num_cam, 3, h, w)
+                current_frame_img = repeat(current_frame_img, 'n h w-> n h w c', c=3).contiguous()
+                current_frame_img = current_frame_img.permute(0, 3, 1, 2).cpu().numpy()
+                
+                self.NeRFDecoder.visualize_image_and_render_depth_pair(
+                    current_frame_img, 
+                    render_depth[0], 
+                    render_depth[0])
+                exit()
+
             ## Compute nerf losses
             if self.use_render_depth_loss:
                 loss_render_depth = self.NeRFDecoder.compute_depth_loss(
@@ -974,7 +983,7 @@ class BEVStereo4DOCCTemporalNeRFPretrainV3(BEVStereo4DOCCNeRFRretrain):
 
     def __init__(self,
                  pretrain_head=None,
-                 final_softplus=True,
+                 final_softplus=False,
                  use_render_depth_loss=True,
                  use_lss_depth_loss=True,
                  use_temporal_align_loss=True,

@@ -537,12 +537,17 @@ class NeRFDecoderHead(nn.Module):
         # plt.show()
         plt.savefig("lidar_occ_nerf_infer_debug.png")
 
-    def visualize_image_and_render_depth_pair(self, images, render_gt, render):
+    def visualize_image_and_render_depth_pair(self, 
+                                              images, 
+                                              render_gt, 
+                                              render,
+                                              save_path=None):
         '''
-        This is a debug function!!
+        Visualize the input RGB image and the rendered dense depth from gt and from
+        prediction.
         Args:
-            images: num_camera, 3, H, W
-            render_gt: num_camera, H, W
+            images: num_camera, 3, H, W, [0, 1].
+            render_gt: num_camera, H, W, dense depth with meters scale.
             render: num_camera, H, W
         '''
         import matplotlib.pyplot as plt
@@ -551,25 +556,26 @@ class NeRFDecoderHead(nn.Module):
         concated_render_gt_list= []
         concated_image_list = []
         
-        depth = render_gt
-        depth = depth.cpu().numpy()
-        render = render.cpu().numpy()
-        render_gt = render_gt.cpu().numpy()
+        render = render.detach().cpu().numpy()
+        render_gt = render_gt.detach().cpu().numpy()
 
         for b in range(len(images)):
-            visual_img = cv2.resize(images[b].transpose((1, 2, 0)), (depth.shape[-1], depth.shape[-2]))
+            visual_img = cv2.resize(images[b].transpose((1, 2, 0)), 
+                                    (render.shape[-1], render.shape[-2]))
             img_mean = np.array([0.485, 0.456, 0.406])[None, None, :]
             img_std = np.array([0.229, 0.224, 0.225])[None, None, :]
             visual_img = np.ascontiguousarray((visual_img * img_std + img_mean))
-
             concated_image_list.append(visual_img)
+
             pred_depth_color = visualize_depth(render[b])
             pred_depth_color = pred_depth_color[..., [2, 1, 0]]
-            concated_render_list.append(cv2.resize(pred_depth_color.copy(), (depth.shape[-1], depth.shape[-2])))
+            concated_render_list.append(cv2.resize(pred_depth_color.copy(), 
+                                                   (render.shape[-1], render.shape[-2])))
 
             pred_depth_color = visualize_depth(render_gt[b])
             pred_depth_color = pred_depth_color[..., [2, 1, 0]]
-            concated_render_gt_list.append(cv2.resize(pred_depth_color.copy(), (depth.shape[-1], depth.shape[-2])))
+            concated_render_gt_list.append(cv2.resize(pred_depth_color.copy(), 
+                                                      (render.shape[-1], render.shape[-2])))
 
         fig, ax = plt.subplots(nrows=6, ncols=3, figsize=(6, 6))
         ij = [[i, j] for i in range(2) for j in range(3)]
@@ -584,7 +590,11 @@ class NeRFDecoderHead(nn.Module):
 
         plt.subplots_adjust(wspace=0.01, hspace=0.01)
         # plt.show()
-        plt.savefig("lidar_occ_nerf_render_infer_error.png")
+        save_dir= "./results"
+        os.makedirs(save_dir, exist_ok=True)
+        full_img_path = osp.join(save_dir, f"rendered_depth_{time.time()}.png") \
+            if save_path is None else save_path
+        plt.savefig(full_img_path)
 
 
     def visualize_image_semantic_depth_pair(self, 

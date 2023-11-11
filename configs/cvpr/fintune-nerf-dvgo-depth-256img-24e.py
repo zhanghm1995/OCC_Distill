@@ -215,7 +215,15 @@ for key in ['val', 'train', 'test']:
     data[key].update(share_data_config)
 
 # Optimizer
-optimizer = dict(type='AdamW', lr=1e-4, weight_decay=1e-2)
+optimizer = dict(
+    type='AdamW', 
+    lr=1e-5, 
+    weight_decay=1e-2,
+    paramwise_cfg=dict(
+        custom_keys={
+            'final_conv': dict(lr_mult=10.0),
+            'predicter': dict(lr_mult=10.0),
+        }),)
 optimizer_config = dict(grad_clip=dict(max_norm=5, norm_type=2))
 
 ## zhm: the original lr_config is as follows:
