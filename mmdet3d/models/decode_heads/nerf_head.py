@@ -490,12 +490,16 @@ class NeRFDecoderHead(nn.Module):
         return batch_depth, batch_rgb, batch_semantic
 
 
-    def visualize_image_depth_pair(self, images, depth, render):
+    def visualize_image_depth_pair(self, 
+                                   images, 
+                                   depth_gt, 
+                                   render,
+                                   save_path=None):
         '''
-        This is a debug function!!
+        Visualize the camera image, sparse GT depth and the rendered dense depth map.
         Args:
             images: num_camera, 3, H, W
-            depth: num_camera, H, W
+            depth_gt: num_camera, H, W, the sparse depth projected by point cloud.
             render: num_camera, H, W
         '''
         import matplotlib.pyplot as plt
@@ -503,11 +507,11 @@ class NeRFDecoderHead(nn.Module):
 
         concated_render_list = []
         concated_image_list = []
-        depth = depth.cpu().numpy()
-        render = render.cpu().numpy()
+        depth_gt = depth_gt.detach().cpu().numpy()
+        render = render.detach().cpu().numpy()
 
         for b in range(len(images)):
-            visual_img = cv2.resize(images[b].transpose((1, 2, 0)), (depth.shape[-1], depth.shape[-2]))
+            visual_img = cv2.resize(images[b].transpose((1, 2, 0)), (depth_gt.shape[-1], depth_gt.shape[-2]))
             img_mean = np.array([0.485, 0.456, 0.406])[None, None, :]
             img_std = np.array([0.229, 0.224, 0.225])[None, None, :]
             visual_img = np.ascontiguousarray((visual_img * img_std + img_mean))
@@ -515,9 +519,10 @@ class NeRFDecoderHead(nn.Module):
             concated_image_list.append(visual_img)
             pred_depth_color = visualize_depth(render[b])
             pred_depth_color = pred_depth_color[..., [2, 1, 0]]
-            concated_render_list.append(cv2.resize(pred_depth_color.copy(), (depth.shape[-1], depth.shape[-2])))
+            concated_render_list.append(
+                cv2.resize(pred_depth_color.copy(), (depth_gt.shape[-1], depth_gt.shape[-2])))
 
-        normalized_voxel_depth = normalize_depth(depth, d_min=self.min_depth, d_max=self.max_depth)
+        normalized_voxel_depth = normalize_depth(depth_gt, d_min=self.min_depth, d_max=self.max_depth)
         fig, ax = plt.subplots(nrows=6, ncols=3, figsize=(6, 6))
         ij = [[i, j] for i in range(2) for j in range(3)]
         for i in range(len(ij)):
@@ -527,7 +532,8 @@ class NeRFDecoderHead(nn.Module):
             ax[ij[i][0], ij[i][1]].imshow(concated_image_list[i])
             ax[ij[i][0] + 2, ij[i][1]].imshow(np.ones_like(concated_render_list[i]) * 255)
             ax[ij[i][0] + 2, ij[i][1]].scatter(normalized_voxel_depth[i].nonzero()[1],
-                                               normalized_voxel_depth[i].nonzero()[0], c=colors_voxel, alpha=0.5, s=0.5)
+                                               normalized_voxel_depth[i].nonzero()[0], 
+                                               c=colors_voxel, alpha=0.5, s=0.5)
             ax[ij[i][0] + 4, ij[i][1]].imshow(concated_render_list[i])
 
             for j in range(3):
@@ -535,20 +541,25 @@ class NeRFDecoderHead(nn.Module):
 
         plt.subplots_adjust(wspace=0.01, hspace=0.01)
         # plt.show()
-        plt.savefig("lidar_occ_nerf_infer_debug.png")
+        save_dir= "./results"
+        os.makedirs(save_dir, exist_ok=True)
+        full_img_path = osp.join(save_dir, f"gt_rendered_depth_{time.time()}.png") \
+            if save_path is None else save_path
+        plt.savefig(full_img_path)
+
 
     def visualize_image_and_render_depth_pair(self, 
                                               images, 
-                                              render_gt, 
-                                              render,
+                                              render_gt_depth, 
+                                              render_depth,
                                               save_path=None):
         '''
         Visualize the input RGB image and the rendered dense depth from gt and from
         prediction.
         Args:
             images: num_camera, 3, H, W, [0, 1].
-            render_gt: num_camera, H, W, dense depth with meters scale.
-            render: num_camera, H, W
+            render_gt_depth: num_camera, H, W
+            render_depth: num_camera, H, W, dense depth with meters scale.
         '''
         import matplotlib.pyplot as plt
 
@@ -556,26 +567,28 @@ class NeRFDecoderHead(nn.Module):
         concated_render_gt_list= []
         concated_image_list = []
         
-        render = render.detach().cpu().numpy()
-        render_gt = render_gt.detach().cpu().numpy()
+        render_depth = render_depth.detach().cpu().numpy()
+        render_gt_depth = render_gt_depth.detach().cpu().numpy()
 
         for b in range(len(images)):
             visual_img = cv2.resize(images[b].transpose((1, 2, 0)), 
-                                    (render.shape[-1], render.shape[-2]))
+                                    (render_depth.shape[-1], render_depth.shape[-2]))
             img_mean = np.array([0.485, 0.456, 0.406])[None, None, :]
             img_std = np.array([0.229, 0.224, 0.225])[None, None, :]
             visual_img = np.ascontiguousarray((visual_img * img_std + img_mean))
             concated_image_list.append(visual_img)
 
-            pred_depth_color = visualize_depth(render[b])
+            pred_depth_color = visualize_depth(render_depth[b])
             pred_depth_color = pred_depth_color[..., [2, 1, 0]]
-            concated_render_list.append(cv2.resize(pred_depth_color.copy(), 
-                                                   (render.shape[-1], render.shape[-2])))
+            concated_render_list.append(
+                cv2.resize(pred_depth_color.copy(), 
+                           (render_depth.shape[-1], render_depth.shape[-2])))
 
-            pred_depth_color = visualize_depth(render_gt[b])
+            pred_depth_color = visualize_depth(render_gt_depth[b])
             pred_depth_color = pred_depth_color[..., [2, 1, 0]]
-            concated_render_gt_list.append(cv2.resize(pred_depth_color.copy(), 
-                                                      (render.shape[-1], render.shape[-2])))
+            concated_render_gt_list.append(
+                cv2.resize(pred_depth_color.copy(), 
+                           (render_depth.shape[-1], render_depth.shape[-2])))
 
         fig, ax = plt.subplots(nrows=6, ncols=3, figsize=(6, 6))
         ij = [[i, j] for i in range(2) for j in range(3)]

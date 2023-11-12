@@ -311,10 +311,10 @@ class NuScenesDatasetOccPretrainV2(NuScenesDatasetOccpancy):
             output[1]['sample_pts_pad'] = torch.from_numpy(sample_pts_pad2).to(torch.long)
 
             ## we don't need the instance masks, render_gt_img in fact
-            output[0].pop('instance_masks')
-            output[0].pop('render_gt_img')
-            output[1].pop('instance_masks')
-            output[1].pop('render_gt_img')
+            output[0].pop('instance_masks', None)
+            output[0].pop('render_gt_img', None)
+            output[1].pop('instance_masks', None)
+            output[1].pop('render_gt_img', None)
 
             # collate these two frames together
             res = collate(output, samples_per_gpu=1)

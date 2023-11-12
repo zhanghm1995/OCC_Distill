@@ -51,7 +51,7 @@ multi_adj_frame_id_cfg = (1, 1 + 1, 1)
 
 model = dict(
     type='BEVStereo4DOCCTemporalNeRFPretrainV3',
-    use_temporal_align_loss=False,
+    use_temporal_align_loss=True,  # if False, only use the rendered depth loss.
     use_render_depth_loss=True,
 
     align_after_view_transfromation=False,
@@ -265,17 +265,8 @@ lr_config = dict(
     warmup_ratio=0.001,
     step=[100,])
 runner = dict(type='EpochBasedRunner', max_epochs=12)
-# evaluation = dict(interval=24, pipeline=test_pipeline)
 
 checkpoint_config = dict(interval=1, max_keep_ckpts=10)
-
-# custom_hooks = [
-#     dict(
-#         type='MEGVIIEMAHook',
-#         init_updates=10560,
-#         priority='NORMAL',
-#     ),
-# ]
 
 log_config = dict(
     interval=10,

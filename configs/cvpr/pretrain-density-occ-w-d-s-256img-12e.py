@@ -26,7 +26,7 @@ data_config = {
     # 'input_size': (224, 352), # SMALL FOR DEBUG
     'src_size': (900, 1600),
     # 'render_size': (90, 160), # SMALL FOR DEBUG
-    'render_size': (256, 704),
+    'render_size': (900, 1600),
 
     # Augmentation
     'resize': (-0.06, 0.11),
@@ -85,10 +85,9 @@ model = dict(
         voxels_size=voxel_size,
         mode='bilinear',  # ['bilinear', 'nearest']
         render_type='density',  # ['prob', 'density']
-        # render_size=data_config['input_size'],
         render_size=data_config['render_size'],
         depth_range=grid_config['depth'][:2],
-        loss_nerf_weight=0.5,
+        loss_nerf_weight=1.0,
         depth_loss_type='silog',  # ['silog', 'l1', 'rl1', 'sml1']
         variance_focus=0.85,  # only for silog loss
     ),
@@ -219,8 +218,8 @@ test_data_config = dict(
     ann_file=data_root + 'bevdetv3-lidarseg-nuscenes_infos_val.pkl')
 
 data = dict(
-    samples_per_gpu=4,
-    workers_per_gpu=8,
+    samples_per_gpu=2,
+    workers_per_gpu=6,
     train=dict(
         data_root=data_root,
         ann_file=data_root + 'bevdetv3-lidarseg-nuscenes_infos_train.pkl',
@@ -241,23 +240,14 @@ for key in ['val', 'train', 'test']:
 optimizer = dict(type='AdamW', lr=1e-4, weight_decay=1e-2)
 optimizer_config = dict(grad_clip=dict(max_norm=5, norm_type=2))
 lr_config = dict(
-    policy='CosineAnnealing',
+    policy='step',
     warmup='linear',
-    warmup_iters=500,
-    warmup_ratio=1.0 / 3,
-    min_lr_ratio=1e-3)
-runner = dict(type='EpochBasedRunner', max_epochs=24)
-evaluation = dict(interval=24, pipeline=test_pipeline)
+    warmup_iters=200,
+    warmup_ratio=0.001,
+    step=[100,])
+runner = dict(type='EpochBasedRunner', max_epochs=12)
 
 checkpoint_config = dict(interval=1, max_keep_ckpts=10)
-
-custom_hooks = [
-    dict(
-        type='MEGVIIEMAHook',
-        init_updates=10560,
-        priority='NORMAL',
-    ),
-]
 
 log_config = dict(
     interval=50,
