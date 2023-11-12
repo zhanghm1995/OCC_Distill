@@ -227,15 +227,15 @@ class NeRFDecoderHead(nn.Module):
         """_summary_
 
         Args:
-            rays_o (_type_): _description_
-            rays_d (_type_): _description_
+            rays_o (_type_): (num_cam, h, w, 3)
+            rays_d (_type_): (num_cam, h, w, 3)
             voxel (_type_): _description_
             rgb_recon (_type_): _description_
             semantic_recon (_type_): _description_
             is_train (bool): _description_
             mode (_type_): _description_
             nonlinear_sample (bool, optional): _description_. Defaults to False.
-            render_mask (_type_, optional): _description_. Defaults to None.
+            render_mask (_type_, optional): (num_cam, h, w). Defaults to None.
             return_weights (bool, optional): _description_. Defaults to False.
             force_render_rgb (bool, optional): Whether force enabling the rgb rendering,
                 it's useful when rendering some RGB image for visualization. Defaults to False.

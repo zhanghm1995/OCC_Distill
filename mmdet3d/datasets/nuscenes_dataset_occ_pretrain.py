@@ -237,6 +237,13 @@ class NuScenesDatasetOccPretrain(NuScenesDatasetOccpancy):
 @DATASETS.register_module()
 class NuScenesDatasetOccPretrainV2(NuScenesDatasetOccpancy):
 
+    def __init__(self,
+                 need_flow_info=True,
+                 **kwargs):
+        super().__init__(**kwargs)
+
+        self.need_flow_info = need_flow_info
+
     def __getitem__(self, idx):
         """Get item from infos according to the given index.
 
@@ -273,42 +280,43 @@ class NuScenesDatasetOccPretrainV2(NuScenesDatasetOccpancy):
                 idx = self._rand_another(idx)
                 continue
 
-            # load the scene flow
-            scene_token = self.data_infos[idx]['scene_token']
-            sample_token1 = data1['img_metas'].data['sample_idx']
-            sample_token2 = data2['img_metas'].data['sample_idx']
+            if self.need_flow_info:
+                # load the scene flow
+                scene_token = self.data_infos[idx]['scene_token']
+                sample_token1 = data1['img_metas'].data['sample_idx']
+                sample_token2 = data2['img_metas'].data['sample_idx']
 
-            scene_flow_fp = osp.join("./data/nuscenes/nuscenes_scene_sequence_npz",
-                                     scene_token, 
-                                     sample_token1 + "_" + sample_token2 + ".npz")
-            
-            scene_flow_dict = np.load(scene_flow_fp)
-            sample_pts_pad1 = scene_flow_dict['coord1']  # (n_cam, n_points, 2)
-            sample_pts_pad2 = scene_flow_dict['coord2']
-
-            render_size = data1['render_gt_depth'].shape[-2:]  # (h, w)
-            origin_h, origin_w = 900, 1600
-            height, width = render_size
-
-            # need add processing when not using (900, 1600) render size
-            # and please note that the last dimension is the number of points
-            if height != origin_h or width != origin_w:
-                scale_h, scale_w = height / origin_h, width / origin_w
+                scene_flow_fp = osp.join("./data/nuscenes/nuscenes_scene_sequence_npz",
+                                        scene_token, 
+                                        sample_token1 + "_" + sample_token2 + ".npz")
                 
-                num_valid_pts_arr1 = sample_pts_pad1[:, -1, :].copy()
-                num_valid_pts_arr2 = sample_pts_pad2[:, -1, :].copy()
+                scene_flow_dict = np.load(scene_flow_fp)
+                sample_pts_pad1 = scene_flow_dict['coord1']  # (n_cam, n_points, 2)
+                sample_pts_pad2 = scene_flow_dict['coord2']
 
-                sample_pts_pad1 *= np.array([scale_w, scale_h])
-                sample_pts_pad2 *= np.array([scale_w, scale_h])
+                render_size = data1['render_gt_depth'].shape[-2:]  # (h, w)
+                origin_h, origin_w = 900, 1600
+                height, width = render_size
 
-                sample_pts_pad1[:, -1, :] = num_valid_pts_arr1
-                sample_pts_pad2[:, -1, :] = num_valid_pts_arr2
-            
-            sample_pts_pad1, sample_pts_pad2 = self.assign_instance_id(
-                data1, sample_pts_pad1, sample_pts_pad2)
+                # need add processing when not using (900, 1600) render size
+                # and please note that the last dimension is the number of points
+                if height != origin_h or width != origin_w:
+                    scale_h, scale_w = height / origin_h, width / origin_w
+                    
+                    num_valid_pts_arr1 = sample_pts_pad1[:, -1, :].copy()
+                    num_valid_pts_arr2 = sample_pts_pad2[:, -1, :].copy()
 
-            output[0]['sample_pts_pad'] = torch.from_numpy(sample_pts_pad1).to(torch.long)
-            output[1]['sample_pts_pad'] = torch.from_numpy(sample_pts_pad2).to(torch.long)
+                    sample_pts_pad1 *= np.array([scale_w, scale_h])
+                    sample_pts_pad2 *= np.array([scale_w, scale_h])
+
+                    sample_pts_pad1[:, -1, :] = num_valid_pts_arr1
+                    sample_pts_pad2[:, -1, :] = num_valid_pts_arr2
+                
+                sample_pts_pad1, sample_pts_pad2 = self.assign_instance_id(
+                    data1, sample_pts_pad1, sample_pts_pad2)
+
+                output[0]['sample_pts_pad'] = torch.from_numpy(sample_pts_pad1).to(torch.long)
+                output[1]['sample_pts_pad'] = torch.from_numpy(sample_pts_pad2).to(torch.long)
 
             ## we don't need the instance masks, render_gt_img in fact
             output[0].pop('instance_masks', None)
