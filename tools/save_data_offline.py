@@ -48,14 +48,15 @@ def load_pickle(pickle_file_path):
             break
 
 
-def load_pickle_infos(anno_file):
+def load_pickle_infos(anno_file, sort=True):
     with open(anno_file, "rb") as fp:
         dataset = pickle.load(fp)
     
     data_infos = dataset['infos']
 
-    ## sort the data infos according to the timestamp to keep the same with BEVDet dataloader.
-    data_infos = list(sorted(data_infos, key=lambda e: e['timestamp']))
+    if sort:
+        ## sort the data infos according to the timestamp to keep the same with BEVDet dataloader.
+        data_infos = list(sorted(data_infos, key=lambda e: e['timestamp']))
     return data_infos
 
 
@@ -450,6 +451,27 @@ def visualize_instance_image(img_src, instance_mask, kept_list=None):
     return image_combined
 
 
+def visualize_instance_image_v2(instance_mask, kept_list=None, color_map=None):
+    instance_img = np.zeros((*instance_mask.shape, 3), dtype=np.uint8)
+    
+    unique_id = np.unique(instance_mask)
+    for id in unique_id:
+        if id == -1:
+            continue
+
+        if kept_list is not None and id not in kept_list:
+            continue
+        
+        if color_map is not None:
+            color = color_map[id]
+        else:
+            color = np.random.random(3) * 255
+        
+        instance_img[instance_mask == id] = color
+    
+    return instance_img
+
+
 def visualize_two_instance_mask(img_src1, inst_mask1, selected_inst_id1,
                                 img_src2, inst_mask2, selected_inst_id2):
     
@@ -509,6 +531,8 @@ def visualize_corres_pts_with_instance(img_src1, pts_with_inst1,
             color = colors[inst_id]
             cv2.circle(img_src1, pt1, 1, color, -1, cv2.LINE_AA)
             cv2.circle(img_src2, pt2, 1, color, -1, cv2.LINE_AA)
+    
+    return colors
 
 
 def visualize_sam_mask(save_root=None):
@@ -697,7 +721,10 @@ def process_linked_sam_mask(save_root=None):
     ]
 
     cam_img_size = [480, 270]  # [w, h]
+    cam_img_size = [1600, 900]  # [w, h]
     for idx, info in tqdm(enumerate(data_infos), total=len(data_infos)):
+        if idx != 4540:
+            continue
         cam_infos1 = info['cams']
         scene_token = info['scene_token']
         sample_token1 = info['token']
@@ -766,8 +793,14 @@ def process_linked_sam_mask(save_root=None):
                 sample_pts_inst1 = np.concatenate([sample_pts1, sampled_instance_mask1[:, None]], axis=1)
                 sample_pts_inst2 = np.concatenate([sample_pts2, sampled_instance_mask1[:, None]], axis=1)
 
-                visualize_corres_pts_with_instance(img1, sample_pts_inst1,
-                                                   img2, sample_pts_inst2)
+                color_map = visualize_corres_pts_with_instance(img1, sample_pts_inst1,
+                                                               img2, sample_pts_inst2)
+                
+                ## visualize the instance masks
+                img1 = visualize_instance_image_v2(instance_mask1, 
+                                                   kept_list=valid_sampled_unique_inst1, 
+                                                   color_map=color_map)
+
                 
                 img1 = Image.fromarray(img1)
                 img2 = Image.fromarray(img2)
@@ -841,11 +874,36 @@ def read_sam_mask():
     print(img.shape, img.dtype, np.unique(img), img.min(), img.max())
 
 
+def save_instance_mask(anno_file, sample_idx: int = None):
+    data_infos = load_pickle_infos(anno_file)
+
+    data_length = len(data_infos)
+    sample_idx = np.random.randint(data_length) if sample_idx is None else sample_idx
+
+    info = data_infos[sample_idx]
+    sample_token = info['token']
+
+    instance_mask_dir = "data/nuscenes/sam_mask_npz_val"
+    instance_mask_path = osp.join(instance_mask_dir, 
+                                  f"{sample_token}.npz")
+    instance_mask_all_cams = np.load(instance_mask_path)['arr_0'].astype(np.int64)
+    instance_imgs = instance_mask_all_cams - 1
+
+    ## save the RGB instance map
+    curr_instance_img = instance_imgs[1]
+    instance_img = visualize_instance_image_v2(curr_instance_img)
+    cv2.imwrite(f"./results/{sample_idx}_instance_mask.jpg", instance_img)
+
+
 def save_point_cloud(anno_file, sample_idx: int = None):
-    with open(anno_file, "rb") as fp:
-        dataset = pickle.load(fp)
-    
-    data_infos = dataset['infos']
+    """Save the point cloud to the xyz file according to the sample index.
+
+    Args:
+        anno_file (str): pickle file path
+        sample_idx (int, optional): the sample idx, if None, we sample 
+          from the dataset randomly. Defaults to None.
+    """
+    data_infos = load_pickle_infos(anno_file)
     
     if sample_idx is None:
         sample_idx = np.random.randint(6019)
@@ -855,8 +913,53 @@ def save_point_cloud(anno_file, sample_idx: int = None):
     points = np.fromfile(points_path, dtype=np.float32).reshape(-1, 5)
     print(points.shape)
 
-    save_path = f"./pts_{sample_idx}.xyz"
+    save_path = f"./results/pts_{sample_idx}.xyz"
     np.savetxt(save_path, points[:, :3])
+
+
+def save_projected_point_cloud(anno_file, sample_idx: int = None):
+    """Project the point cloud to the image and save the image.
+
+    Args:
+        anno_file (str): pickle file path
+        sample_idx (int, optional): the sample idx, if None, we sample 
+          from the dataset randomly. Defaults to None.
+    """
+    from optical_flow.create_scene_optical_flow import get_lidar2img_all_cams, \
+        project_points_to_image, draw_points
+    
+    choose_cams = [
+        'CAM_FRONT_LEFT', 'CAM_FRONT', 'CAM_FRONT_RIGHT', 'CAM_BACK_LEFT',
+        'CAM_BACK', 'CAM_BACK_RIGHT'
+    ]
+
+    data_infos = load_pickle_infos(anno_file)
+    
+    if sample_idx is None:
+        sample_idx = np.random.randint(6019)
+    info = data_infos[sample_idx]
+    
+    lidar_path = info['lidar_path']
+    points1 = np.fromfile(lidar_path, dtype=np.float32).reshape(-1, 5)[:, :3]
+    mask31 = points1[:, 2] > -4.0
+    mask32 = points1[:, 2] < 3.0
+    mask = mask31 & mask32
+    points1 = points1[mask]  # filter the points underground
+    points1 = torch.from_numpy(points1)
+
+    cam_idx = 1
+    lidar2img = get_lidar2img_all_cams(info, choose_cams)
+
+    coord, coord1_origin, _, point_mask = project_points_to_image(
+        points1, lidar2img[cam_idx], 900, 1600)
+    
+    ## visualize the projected points
+    cam = choose_cams[cam_idx]
+    img_path = info['cams'][cam]['data_path']
+    img = cv2.imread(img_path)
+    img = draw_points(img, coord)
+    save_path = f"./results/{sample_idx}_{cam}_pts.jpg"
+    cv2.imwrite(save_path, img)
 
 
 def save_scene_sequence_image(anno_file):
@@ -911,7 +1014,12 @@ def save_scene_sequence_image(anno_file):
 
 
 if __name__ == "__main__":
-    process_linked_sam_mask(save_root="./results/cvpr_flow_points_cat")
+    pickle_path = "data/nuscenes/bevdetv3-lidarseg-nuscenes_infos_val.pkl"
+
+    # save_projected_point_cloud(pickle_path, sample_idx=4540)
+    # exit()
+
+    process_linked_sam_mask(save_root="./results/cvpr_figure3")
     exit()
 
     # visualize_sam_mask(save_root="./results/cvpr_flow_points_cat")
@@ -943,8 +1051,7 @@ if __name__ == "__main__":
 
     save_all_cam_images(pickle_path, save_root="./aaai_all_validation")
     exit(0)
-    save_point_cloud(pickle_path, sample_idx=3827)
-    exit()
+    
     
     
     

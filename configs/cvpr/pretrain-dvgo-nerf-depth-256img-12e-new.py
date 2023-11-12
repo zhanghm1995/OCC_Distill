@@ -162,9 +162,16 @@ train_pipeline = [
         render_size=data_config['render_size'],
         render_scale=[data_config['render_size'][0]/data_config['src_size'][0], 
                       data_config['render_size'][1]/data_config['src_size'][1]]),
+    # dict(type='LoadInstanceMaskFromFile',
+    #      is_train=True,
+    #      data_config=data_config,
+    #      sequential=False,
+    #      mode='npz',
+    #      instance_mask_dir='data/nuscenes/sam_mask_npz'),
     dict(type='DefaultFormatBundle3D', class_names=class_names),
     dict(
         type='Collect3D', keys=['img_inputs', 'gt_depth', 
+                                # 'render_gt_img', 'instance_masks',
                                 'render_gt_depth',
                                 'intricics', 'pose_spatial', 
                                 'flip_dx', 'flip_dy'])
