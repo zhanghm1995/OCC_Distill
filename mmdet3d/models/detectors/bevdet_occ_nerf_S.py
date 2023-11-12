@@ -178,13 +178,6 @@ class BEVStereo4DOCCRender(BEVStereo4DOCC):
         if self.use_predicter:
             occ_pred = self.predicter(occ_pred)
         
-        intricics = kwargs['intricics']
-        pose_spatial = kwargs['pose_spatial']
-        flip_dx, flip_dy = kwargs['flip_dx'], kwargs['flip_dy']
-        
-        render_img_gt = kwargs['render_gt_img']
-        render_gt_depth = kwargs['render_gt_depth']
-        
         ## ============== compute the losses ==============
         losses = dict()
 
@@ -218,6 +211,12 @@ class BEVStereo4DOCCRender(BEVStereo4DOCC):
         else:
             rgb_recons = torch.zeros_like(density_prob)
 
+        ## ------------ Rendering --------------
+        intricics = kwargs['intricics']
+        pose_spatial = kwargs['pose_spatial']
+        flip_dx, flip_dy = kwargs['flip_dx'], kwargs['flip_dy']
+        render_gt_depth = kwargs['render_gt_depth']
+
         # cancel the effect of flip augmentation
         rgb_flip = self.inverse_flip_aug(rgb_recons, flip_dx, flip_dy)
         semantic_flip = self.inverse_flip_aug(semantic, flip_dx, flip_dy)
@@ -246,7 +245,8 @@ class BEVStereo4DOCCRender(BEVStereo4DOCC):
                     render_depth, render_gt_depth, render_gt_depth > 0.0)
                 if torch.isnan(loss_nerf):
                     print('NaN in DepthNeRF loss!')
-                    loss_nerf = loss_depth
+                    loss_nerf = torch.nan_to_num(loss_nerf)
+                    # loss_nerf = loss_depth
                 losses['loss_render_depth'] = loss_nerf
 
             if self.NeRFDecoder.semantic_head:
