@@ -24,3 +24,5 @@ model = dict(
         use_sigmoid=False,
         loss_weight=1.0),
 )
+
+find_unused_parameters = True
