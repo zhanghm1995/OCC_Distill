@@ -1617,6 +1617,7 @@ class BEVStereo4DOCCTemporalNeRFPretrainV4(BEVStereo4DOCC):
         if self.NeRFDecoder.mask_render:
             ### Supervise the render depth by using the whole point cloud
             render_mask = render_gt_depth > 0.0  # (b, num_cam, h, w)
+            self.NeRFDecoder.semantic_head = False
             render_depth, rgb_pred, semantic_pred = self.NeRFDecoder(
                 density_prob_flip, rgb_flip, semantic_flip, 
                 intricics, pose_spatial, True, render_mask)
@@ -1636,6 +1637,7 @@ class BEVStereo4DOCCTemporalNeRFPretrainV4(BEVStereo4DOCC):
                 # (seq_len*b, num_cam, h, w)
                 render_mask = self.prepare_render_mask(sample_pts_pad, 
                                                        kwargs['render_gt_depth'])
+                self.NeRFDecoder.semantic_head = True
                 render_depth, rgb_pred, semantic_pred = self.NeRFDecoder(
                     density_prob_flip, rgb_flip, semantic_flip, 
                     intricics, pose_spatial, True, render_mask)
