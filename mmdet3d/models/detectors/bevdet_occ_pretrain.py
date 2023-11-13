@@ -1448,3 +1448,263 @@ class BEVStereo4DOCCTemporalNeRFPretrainV3(BEVStereo4DOCCNeRFRretrain):
                 render_mask[i, j][curr_sample_pts[:, 1], curr_sample_pts[:, 0]] = 1
 
         return render_mask.to(torch.bool)
+
+
+@DETECTORS.register_module()
+class BEVStereo4DOCCTemporalNeRFPretrainV4(BEVStereo4DOCC):
+    """Using the temporal alignment strategy to pretrain the Occupancy models.
+    In this version, we use the seperate the density prediction network, and we
+    only render the sampled lidar points for reducing the memory cost.
+
+    Args:
+        BEVStereo4DOCCNeRFRretrain (_type_): _description_
+    """
+
+    def __init__(self,
+                 nerf_head=None,
+                 pretrain_head=None,
+                 final_softplus=False,
+                 use_render_depth_loss=True,
+                 use_lss_depth_loss=True,
+                 use_temporal_align_loss=True,
+                 use_loss_norm=False,
+                 use_projector=True,
+                 **kwargs):
+        
+        super(BEVStereo4DOCCTemporalNeRFPretrainV4, self).__init__(
+            use_predicter=False, **kwargs)
+
+        self.use_lss_depth_loss = use_lss_depth_loss
+        self.use_render_depth_loss = use_render_depth_loss
+        self.use_temporal_align_loss = use_temporal_align_loss
+        self.use_loss_norm = use_loss_norm
+        self.use_projector = use_projector
+
+        self.NeRFDecoder = builder.build_backbone(nerf_head)
+
+        self.num_random_view = self.NeRFDecoder.num_random_view
+
+        if pretrain_head is not None:
+            self.pretrain_head = builder.build_head(pretrain_head)
+
+        self.final_conv = ConvModule(
+            self.img_view_transformer.out_channels,
+            self.out_dim,
+            kernel_size=3,
+            stride=1,
+            padding=1,
+            bias=True,
+            conv_cfg=dict(type='Conv3d'))
+        
+        if final_softplus:
+            self.density_mlp = nn.Sequential(
+                nn.Linear(self.out_dim, self.out_dim*2),
+                nn.Softplus(),
+                nn.Linear(self.out_dim*2, 2),
+                nn.Softplus(),
+            )
+        else:
+            self.density_mlp = nn.Sequential(
+                nn.Linear(self.out_dim, self.out_dim*2),
+                nn.Softplus(),
+                nn.Linear(self.out_dim*2, 2),
+            )
+
+        if self.use_projector:
+            self.projector = nn.Sequential(
+                nn.Linear(self.out_dim, self.out_dim*2),
+                nn.Softplus(),
+                nn.Linear(self.out_dim*2, 17))
+
+    @staticmethod
+    def inverse_flip_aug(feat, flip_dx, flip_dy):
+        batch_size = feat.shape[0]
+        feat_flip = []
+        for b in range(batch_size):
+            flip_flag_x = flip_dx[b]
+            flip_flag_y = flip_dy[b]
+            tmp = feat[b]
+            if flip_flag_x:
+                tmp = tmp.flip(1)
+            if flip_flag_y:
+                tmp = tmp.flip(2)
+            feat_flip.append(tmp)
+        feat_flip = torch.stack(feat_flip)
+        return feat_flip
+    
+    def reshape_kwargs(self, 
+                       batch, 
+                       keep_keys=['instance_selected_points']):
+        output = {}
+        for key, value in batch.items():
+            if key in keep_keys:
+                output[key] = value
+                continue
+            # to (seq_len * b, ...)
+            if len(value.shape) == 2:
+                output[key] = value.transpose(0, 1).reshape(-1)
+            else:
+                output[key] = value.transpose(0, 1).reshape(-1, *value.shape[2:])
+        return output
+
+    def forward_train(self,
+                      points=None,
+                      img_metas=None,
+                      img_inputs=None,
+                      **kwargs):
+        """Forward training function.
+
+        Returns:
+            dict: Losses of different branches.
+        """
+        if img_inputs[0].dim() == 6:
+            img_inputs_new = []
+            for entry in img_inputs:
+                entry = entry.transpose(0, 1).reshape(-1, *entry.shape[2:])
+                img_inputs_new.append(entry)
+            img_inputs = img_inputs_new
+
+            kwargs = self.reshape_kwargs(kwargs)
+        
+        img_feats, _, depth = self.extract_feat(
+            points, img=img_inputs, img_metas=img_metas, **kwargs)
+        
+        # occupancy prediction
+        voxel_feats = self.final_conv(img_feats[0]).permute(0, 4, 3, 2, 1)  # to (b, 200, 200, 16, c)
+        
+        losses = dict()
+        if self.use_lss_depth_loss:
+            gt_depth = kwargs['gt_depth']
+            loss_lss_depth = self.img_view_transformer.get_depth_loss(gt_depth, depth)
+            losses['loss_lss_depth'] = loss_lss_depth
+        
+        intricics = kwargs['intricics']
+        pose_spatial = kwargs['pose_spatial']
+        flip_dx, flip_dy = kwargs['flip_dx'], kwargs['flip_dy']
+        render_gt_depth = kwargs['render_gt_depth']  # [B, num_cam, H, W]
+
+        # predict the density
+        density_prob = self.density_mlp(voxel_feats)[..., 0:1]
+
+        if self.use_projector:
+            semantic_feats = self.projector(voxel_feats)  # to (b, 200, 200, 16, c)
+        else:
+            semantic_feats = voxel_feats
+
+        density_prob = rearrange(density_prob, 'b x y z c -> b c x y z')
+        semantic_feats = rearrange(semantic_feats, 'b x y z c -> b c x y z')
+
+        # image reconstruction
+        rgb_recons = torch.zeros_like(density_prob)
+
+        # cancel the effect of flip augmentation
+        rgb_flip = self.inverse_flip_aug(rgb_recons, flip_dx, flip_dy)
+        semantic_flip = self.inverse_flip_aug(semantic_feats, flip_dx, flip_dy)
+        density_prob_flip = self.inverse_flip_aug(density_prob, flip_dx, flip_dy)
+
+        # random view selection
+        rand_ind = None
+        if self.num_random_view != -1:
+            rand_ind = torch.multinomial(
+                torch.tensor([1 / self.num_random_view] * 6), 
+                self.num_random_view, 
+                replacement=False)
+            intricics = intricics[:, rand_ind]
+            pose_spatial = pose_spatial[:, rand_ind]
+            render_gt_depth = render_gt_depth[:, rand_ind]
+
+        # rendering
+        if self.NeRFDecoder.mask_render:
+            ### Supervise the render depth by using the whole point cloud
+            render_mask = render_gt_depth > 0.0  # (b, num_cam, h, w)
+            render_depth, rgb_pred, semantic_pred = self.NeRFDecoder(
+                density_prob_flip, rgb_flip, semantic_flip, 
+                intricics, pose_spatial, True, render_mask)
+            
+            if self.use_render_depth_loss:
+                render_gt_depth = render_gt_depth[render_mask]
+                loss_nerf = self.NeRFDecoder.compute_depth_loss(
+                    render_depth, render_gt_depth, render_gt_depth > 0.0)
+                if torch.isnan(loss_nerf):
+                    print('NaN in DepthNeRF loss!')
+                    loss_nerf = loss_lss_depth
+                losses['loss_render_depth'] = loss_nerf
+
+            if self.use_temporal_align_loss:
+                sample_pts_pad = kwargs['sample_pts_pad']  # (b, num_cam, N, 2)
+
+                # (seq_len*b, num_cam, h, w)
+                render_mask = self.prepare_render_mask(sample_pts_pad, 
+                                                       kwargs['render_gt_depth'])
+                render_depth, rgb_pred, semantic_pred = self.NeRFDecoder(
+                    density_prob_flip, rgb_flip, semantic_flip, 
+                    intricics, pose_spatial, True, render_mask)
+                
+                feats_dict = dict()
+                feats_dict['render_semantic'] = semantic_pred
+                feats_dict['render_mask'] = render_mask
+
+                loss_contrast_dict = self.pretrain_head.loss_with_render_mask(
+                    feats_dict, rand_view_idx=rand_ind, **kwargs)
+                losses.update(loss_contrast_dict)
+            
+        else:  # rendering the whole images
+            ## Rendering
+            # import time
+            # torch.cuda.synchronize()
+            # start = time.time()
+            render_depth, rgb_pred, semantic_pred = self.NeRFDecoder(
+                density_prob_flip, rgb_flip, semantic_flip, 
+                intricics, pose_spatial, True)
+            # end = time.time()
+            # print("Rendering time:", end - start)
+
+            ## Compute nerf losses
+            if self.use_render_depth_loss:
+                loss_render_depth = self.NeRFDecoder.compute_depth_loss(
+                    render_depth, render_gt_depth, render_gt_depth > 0.0)
+                if torch.isnan(loss_render_depth):
+                    print('NaN in DepthNeRF loss!')
+                    loss_render_depth = loss_lss_depth
+                losses['loss_render_depth'] = loss_render_depth
+
+            if self.use_temporal_align_loss:
+                feats_dict = dict()
+                feats_dict['render_semantic'] = semantic_pred  # (seq*b, num_cam, c, h, w)
+
+                # start = time.time()
+                
+                loss_contrast_dict = self.pretrain_head.loss(
+                    feats_dict, rand_view_idx=rand_ind, **kwargs)
+                losses.update(loss_contrast_dict)
+
+                # end = time.time()
+                # print("Computing loss time:", end - start)
+
+        if self.use_loss_norm:
+            for key, value in losses.items():
+                losses[key] = value / (value.detach() + 1e-5)
+
+        return losses
+    
+    def prepare_render_mask(self, sample_pts_pad, render_gt_depth):
+        """_summary_
+
+        Args:
+            sample_pts_pad (_type_): (seq_len*b, num_cam, N, 2)
+            render_gt_depth (_type_): (seq_len*b, num_cam, h, w)
+
+        Returns:
+            _type_: (seq_len*b, num_cam, h, w)
+        """
+        bs, num_cam = sample_pts_pad.shape[:2]
+        render_mask = torch.zeros_like(render_gt_depth)
+
+        for i in range(bs):
+            for j in range(num_cam):
+                num_valid_pts = sample_pts_pad[i, j, -1, 0]
+                curr_sample_pts = sample_pts_pad[i, j, :num_valid_pts]
+                
+                render_mask[i, j][curr_sample_pts[:, 1], curr_sample_pts[:, 0]] = 1
+
+        return render_mask.to(torch.bool)
