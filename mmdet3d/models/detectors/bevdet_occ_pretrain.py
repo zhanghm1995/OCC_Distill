@@ -1024,11 +1024,11 @@ class BEVStereo4DOCCTemporalNeRFPretrainV2Origin(BEVStereo4DOCC):
             if key in keep_keys:
                 output[key] = value
                 continue
-            
+            # to (seq_len * b, ...)
             if len(value.shape) == 2:
-                output[key] = value.view(-1)
+                output[key] = value.transpose(0, 1).reshape(-1)
             else:
-                output[key] = value.view(-1, *value.shape[2:])
+                output[key] = value.transpose(0, 1).reshape(-1, *value.shape[2:])
         return output
 
     def forward_train(self,
@@ -1044,7 +1044,7 @@ class BEVStereo4DOCCTemporalNeRFPretrainV2Origin(BEVStereo4DOCC):
         if img_inputs[0].dim() == 6:
             img_inputs_new = []
             for entry in img_inputs:
-                entry = entry.view(-1, *entry.shape[2:])
+                entry = entry.transpose(0, 1).reshape(-1, *entry.shape[2:])
                 img_inputs_new.append(entry)
             img_inputs = img_inputs_new
 
@@ -1106,6 +1106,7 @@ class BEVStereo4DOCCTemporalNeRFPretrainV2Origin(BEVStereo4DOCC):
 
         # rendering
         if self.NeRFDecoder.mask_render:
+            ### Supervise the render depth by using the whole point cloud
             render_mask = render_gt_depth > 0.0  # (b, num_cam, h, w)
             render_depth, rgb_pred, semantic_pred = self.NeRFDecoder(
                 density_prob_flip, rgb_flip, semantic_flip, 
@@ -1118,7 +1119,26 @@ class BEVStereo4DOCCTemporalNeRFPretrainV2Origin(BEVStereo4DOCC):
                 if torch.isnan(loss_nerf):
                     print('NaN in DepthNeRF loss!')
                     loss_nerf = loss_lss_depth
-                losses['loss_nerf'] = loss_nerf
+                losses['loss_render_depth'] = loss_nerf
+            
+            ### Supervise the render semantic by using the contrastive loss
+            if self.use_temporal_align_loss:
+                sample_pts_pad = kwargs['sample_pts_pad']  # (b, num_cam, N, 2)
+
+                # (seq_len*b, num_cam, h, w)
+                render_mask = self.prepare_render_mask(sample_pts_pad, 
+                                                       kwargs['render_gt_depth'])
+                render_depth, rgb_pred, semantic_pred = self.NeRFDecoder(
+                    density_prob_flip, rgb_flip, semantic_flip, 
+                    intricics, pose_spatial, True, render_mask)
+                
+                feats_dict = dict()
+                feats_dict['render_semantic'] = semantic_pred
+                feats_dict['render_mask'] = render_mask
+
+                loss_contrast_dict = self.pretrain_head.loss_with_render_mask(
+                    feats_dict, rand_view_idx=rand_ind, **kwargs)
+                losses.update(loss_contrast_dict)
             
         else:  # rendering the whole images
             ## Rendering
@@ -1166,6 +1186,27 @@ class BEVStereo4DOCCTemporalNeRFPretrainV2Origin(BEVStereo4DOCC):
 
         return losses
     
+    def prepare_render_mask(self, sample_pts_pad, render_gt_depth):
+        """_summary_
+
+        Args:
+            sample_pts_pad (_type_): (seq_len*b, num_cam, N, 2)
+            render_gt_depth (_type_): (seq_len*b, num_cam, h, w)
+
+        Returns:
+            _type_: (seq_len*b, num_cam, h, w)
+        """
+        bs, num_cam = sample_pts_pad.shape[:2]
+        render_mask = torch.zeros_like(render_gt_depth)
+
+        for i in range(bs):
+            for j in range(num_cam):
+                num_valid_pts = sample_pts_pad[i, j, -1, 0]
+                curr_sample_pts = sample_pts_pad[i, j, :num_valid_pts]
+                
+                render_mask[i, j][curr_sample_pts[:, 1], curr_sample_pts[:, 0]] = 1
+
+        return render_mask.to(torch.bool)
 
 
 @DETECTORS.register_module()

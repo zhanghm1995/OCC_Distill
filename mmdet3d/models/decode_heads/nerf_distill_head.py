@@ -465,8 +465,7 @@ class NeRFOccPretrainHead(BaseModule):
                         )
                         if torch.isnan(loss_curr_pw_align):
                             print("NaN loss_curr_pw_align")
-                            import ipdb
-                            ipdb.set_trace()
+                            loss_curr_pw_align = torch.nan_to_num(loss_curr_pw_align)
 
                         all_camera_contrast_loss.append(loss_curr_pw_align)
 
