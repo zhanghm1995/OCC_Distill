@@ -288,4 +288,4 @@ log_config = dict(
         dict(type='TensorboardLoggerHook')
     ])
 
-load_from = "bevdet-r50-4d-stereo-cbgs.pth"
+load_from = "ckpts/bevdet-r50-4d-stereo-cbgs.pth"

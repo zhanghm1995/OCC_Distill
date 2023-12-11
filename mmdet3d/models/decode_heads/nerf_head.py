@@ -99,6 +99,27 @@ def get_rays_of_a_view(H, W, K, c2w, inverse_y, flip_x, flip_y, mode='center'):
 
     return rays_o_all, rays_d_all
 
+
+class SingleVarianceNetwork(nn.Module):
+    """Variance network in NeuS"""
+
+    def __init__(self, init_val):
+        super(SingleVarianceNetwork, self).__init__()
+        self.register_parameter(
+            "variance", nn.Parameter(init_val * torch.ones(1), requires_grad=True)
+        )
+
+    def forward(self, x):
+        """Returns current variance value"""
+        return torch.ones([len(x), 1], device=x.device) * torch.exp(
+            self.variance * 10.0
+        )
+
+    def get_variance(self):
+        """return current variance value"""
+        return torch.exp(self.variance * 10.0).clip(1e-6, 1e6)
+
+
 @HEADS.register_module()
 class NeRFDecoderHead(nn.Module):
     def __init__(self, 
@@ -145,7 +166,10 @@ class NeRFDecoderHead(nn.Module):
 
         N_samples = int(np.linalg.norm(np.array([voxels_size[0] // 2, voxels_size[1] // 2, voxels_size[2] // 2]) + 1) / self.stepsize) + 1
         self.register_buffer('rng', torch.arange(N_samples)[None].float())
-        # print('rng', self.rng)
+
+        if self.render_type == 'neus':
+            # deviation_network to compute alpha from sdf from NeuS
+            self.deviation_network = SingleVarianceNetwork(init_val=self.beta_init)
 
     def grid_sampler(self, xyz, grid, align_corners=True, mode='bilinear'):
         '''Wrapper for the interp operation'''
@@ -317,6 +341,47 @@ class NeRFDecoderHead(nn.Module):
                 semantic_marched = depth
             
             rgb_marched = depth  # TODO: add rgb_marched
+        elif self.render_type == 'neus':
+            sdf = density
+            dists = interval[..., 1:] - interval[..., :-1]
+            d_output = torch.ones_like(sdf, requires_grad=False, device=sdf.device)
+            gradients = torch.autograd.grad(
+                outputs=sdf,
+                inputs=mask_rays_pts,
+                grad_outputs=d_output,
+                create_graph=True,
+                retain_graph=True,
+                only_inputs=True,
+            )[0]
+
+            inv_s = self.deviation_network.get_variance()  # Single parameter
+
+            true_cos = (dirs * gradients).sum(-1, keepdim=True)
+
+            cos_anneal_ratio = 1.0
+            # "cos_anneal_ratio" grows from 0 to 1 in the beginning training iterations. The anneal strategy below makes
+            # the cos value "not dead" at the beginning training iterations, for better convergence.
+            iter_cos = -(F.relu(-true_cos * 0.5 + 0.5) * (1.0 - cos_anneal_ratio) +
+                        F.relu(-true_cos) * cos_anneal_ratio)  # always non-positive
+
+            # Estimate signed distances at section points
+            estimated_next_sdf = sdf + iter_cos * dists.reshape(-1, 1) * 0.5
+            estimated_prev_sdf = sdf - iter_cos * dists.reshape(-1, 1) * 0.5
+
+            prev_cdf = torch.sigmoid(estimated_prev_sdf * inv_s)
+            next_cdf = torch.sigmoid(estimated_next_sdf * inv_s)
+
+            p = prev_cdf - next_cdf
+            c = prev_cdf
+
+            alpha = ((p + 1e-5) / (c + 1e-5)).clip(0.0, 1.0)
+
+            weights = alpha * torch.cumprod(
+                torch.cat([torch.ones([*alpha.shape[:1], 1]), 1. - alpha + 1e-7], -1), -1)[:, :-1]
+            
+            eps = 1e-10
+            depth = torch.sum(weights * interval, dim=-2) / (torch.sum(weights, -2) + eps)
+            depth = torch.clip(depth, interval.min(), interval.max())
 
         elif self.render_type == 'density':
             # torch.cuda.synchronize()
