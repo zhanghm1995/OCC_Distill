@@ -169,7 +169,7 @@ class NeRFDecoderHead(nn.Module):
 
         if self.render_type == 'neus':
             # deviation_network to compute alpha from sdf from NeuS
-            self.deviation_network = SingleVarianceNetwork(init_val=self.beta_init)
+            self.deviation_network = SingleVarianceNetwork(init_val=0.3)
 
     def grid_sampler(self, xyz, grid, align_corners=True, mode='bilinear'):
         '''Wrapper for the interp operation'''
@@ -281,6 +281,7 @@ class NeRFDecoderHead(nn.Module):
                 rays_o_i, rays_d_i, is_train=is_train, nonlinear_sample=nonlinear_sample)
 
         mask_rays_pts = rays_pts[~mask_outbbox]
+        mask_rays_pts.requires_grad_(True)
         density = self.grid_sampler(mask_rays_pts, voxel, mode=mode)
 
         if self.render_type == 'prob':
@@ -342,8 +343,14 @@ class NeRFDecoderHead(nn.Module):
             
             rgb_marched = depth  # TODO: add rgb_marched
         elif self.render_type == 'neus':
-            sdf = density
-            dists = interval[..., 1:] - interval[..., :-1]
+            z_vals = interval.expand(rays_pts.shape[:2])
+            dists = z_vals[..., 1:] - z_vals[..., :-1]
+            dists = torch.cat([dists, dists[0, -1].expand(dists[...,:1].shape)], -1)  # [N_rays, N_samples]
+            dists = dists[~mask_outbbox]
+            
+            sdf = density  # (N, M)
+            sdf = sdf[..., None]
+
             d_output = torch.ones_like(sdf, requires_grad=False, device=sdf.device)
             gradients = torch.autograd.grad(
                 outputs=sdf,
@@ -355,7 +362,8 @@ class NeRFDecoderHead(nn.Module):
             )[0]
 
             inv_s = self.deviation_network.get_variance()  # Single parameter
-
+            
+            dirs = rays_d_i[:, None].expand(rays_pts.shape)[~mask_outbbox]
             true_cos = (dirs * gradients).sum(-1, keepdim=True)
 
             cos_anneal_ratio = 1.0
@@ -376,12 +384,30 @@ class NeRFDecoderHead(nn.Module):
 
             alpha = ((p + 1e-5) / (c + 1e-5)).clip(0.0, 1.0)
 
-            weights = alpha * torch.cumprod(
-                torch.cat([torch.ones([*alpha.shape[:1], 1]), 1. - alpha + 1e-7], -1), -1)[:, :-1]
+            alpha_raw = torch.zeros_like(rays_pts[..., 0])
+            alpha_raw[~mask_outbbox] = alpha[:, 0]  # (N, M)
+            transmittance = torch.cumprod(
+                torch.cat([torch.ones([*alpha_raw.shape[:1], 1], device=alpha_raw.device), 
+                           1. - alpha_raw + 1e-7], -1), -1)
+            weights = alpha_raw * transmittance[:, :-1]
             
             eps = 1e-10
-            depth = torch.sum(weights * interval, dim=-2) / (torch.sum(weights, -2) + eps)
+            depth = torch.sum(weights * interval, dim=1) / (torch.sum(weights, 1) + eps)
             depth = torch.clip(depth, interval.min(), interval.max())
+
+            if self.semantic_head:
+                semantic = self.grid_sampler(mask_rays_pts, semantic_recon)
+                B, N = rays_pts.shape[:2]
+                semantic_cache = torch.zeros((B, N, semantic_recon.shape[0])).to(rays_pts.device)
+                semantic_cache[~mask_outbbox] = semantic  # (N, C)
+                semantic_marched = torch.sum(weights[..., None] * semantic_cache, -2)
+            else:
+                semantic_marched = depth
+
+            # eikonal_loss
+            eikonal_loss = ((gradients.norm(2, dim=-1) - 1) ** 2).mean()
+            loss_dict = dict()
+            loss_dict['eikonal_loss'] = eikonal_loss
 
         elif self.render_type == 'density':
             # torch.cuda.synchronize()

@@ -443,7 +443,8 @@ class MyBEVStereo4DOCCNeRFVisualizer(BEVStereo4D):
         if True:  # DEBUG ONLY!
             # to (b, 1, 200, 200, 16)
             visualizer = NeRFVisualizer()
-            visualizer.visualize_gt_occ(self.NeRFDecoder, self.num_frame,
+            visualizer.visualize_gt_occ(self.NeRFDecoder, 
+                                        self.num_frame,
                                         voxel_semantics,
                                         render_img_gt, flip_dx, flip_dy,
                                         intricics, pose_spatial)
