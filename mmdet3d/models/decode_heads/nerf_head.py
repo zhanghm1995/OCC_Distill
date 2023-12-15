@@ -16,7 +16,7 @@ import os
 import os.path as osp
 import time
 from torch_scatter import segment_coo
-
+from smooth_sampler import SmoothSampler
 from mmdet3d.models.builder import HEADS
 from mmdet3d.models.losses.lovasz_loss import lovasz_softmax
 from mmdet3d.models.nerf.utils import Raw2Alpha, Alphas2Weights
@@ -181,6 +181,29 @@ class NeRFDecoderHead(nn.Module):
         ret_lst = ret_lst.reshape(grid.shape[1], -1).T.reshape(*shape, grid.shape[1]).squeeze()
         return ret_lst
 
+    def interpolate_feats(self, xyz, feats_volume):
+        shape = xyz.shape[:-1]
+        xyz = xyz.reshape(1, 1, 1, -1, 3)
+        feats_volume = feats_volume.unsqueeze(0)
+        ind_norm = ((xyz - self.xyz_min) / (self.xyz_max - self.xyz_min)).flip((-1,)) * 2 - 1  # XYZ
+        if False:
+            from mmdet3d.ops.cuda_gridsample_grad2 import cuda_gridsample as cudagrid
+            feats = cudagrid.grid_sample_3d(
+                feats_volume, ind_norm.float(), align_corners=True, padding_mode="border"
+            )
+            feats = feats.reshape(feats_volume.shape[1], -1).T.reshape(*shape, feats_volume.shape[1]).squeeze()
+        else:
+            feats = SmoothSampler.apply(
+                    feats_volume,
+                    ind_norm.float(),
+                    "zeros",
+                    True,
+                    False,
+                )
+        
+        feats = feats.reshape(feats_volume.shape[1], -1).T.reshape(*shape, feats_volume.shape[1]).squeeze()
+        return feats
+    
     @staticmethod
     def construct_ray_warps(fn, t_near, t_far):
         """Construct a bijection between metric distances and normalized distances.
@@ -282,7 +305,9 @@ class NeRFDecoderHead(nn.Module):
 
         mask_rays_pts = rays_pts[~mask_outbbox]
         mask_rays_pts.requires_grad_(True)
-        density = self.grid_sampler(mask_rays_pts, voxel, mode=mode)
+        # density = self.grid_sampler(mask_rays_pts, voxel, mode=mode)
+        with torch.enable_grad():
+            density = self.interpolate_feats(mask_rays_pts, voxel)
 
         if self.render_type == 'prob':
             probs = torch.zeros_like(rays_pts[..., 0])
@@ -396,7 +421,8 @@ class NeRFDecoderHead(nn.Module):
             depth = torch.clip(depth, interval.min(), interval.max())
 
             if self.semantic_head:
-                semantic = self.grid_sampler(mask_rays_pts, semantic_recon)
+                semantic = self.interpolate_feats(mask_rays_pts, semantic_recon)
+
                 B, N = rays_pts.shape[:2]
                 semantic_cache = torch.zeros((B, N, semantic_recon.shape[0])).to(rays_pts.device)
                 semantic_cache[~mask_outbbox] = semantic  # (N, C)
@@ -408,6 +434,8 @@ class NeRFDecoderHead(nn.Module):
             eikonal_loss = ((gradients.norm(2, dim=-1) - 1) ** 2).mean()
             loss_dict = dict()
             loss_dict['eikonal_loss'] = eikonal_loss
+
+            rgb_marched = depth  # TODO: add rgb_marched
 
         elif self.render_type == 'density':
             # torch.cuda.synchronize()
