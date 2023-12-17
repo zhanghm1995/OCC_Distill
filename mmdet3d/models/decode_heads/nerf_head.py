@@ -16,7 +16,6 @@ import os
 import os.path as osp
 import time
 from torch_scatter import segment_coo
-from smooth_sampler import SmoothSampler
 from mmdet3d.models.builder import HEADS
 from mmdet3d.models.losses.lovasz_loss import lovasz_softmax
 from mmdet3d.models.nerf.utils import Raw2Alpha, Alphas2Weights
@@ -182,6 +181,8 @@ class NeRFDecoderHead(nn.Module):
         return ret_lst
 
     def interpolate_feats(self, xyz, feats_volume):
+        from smooth_sampler import SmoothSampler
+        
         shape = xyz.shape[:-1]
         xyz = xyz.reshape(1, 1, 1, -1, 3)
         feats_volume = feats_volume.unsqueeze(0)
