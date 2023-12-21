@@ -209,10 +209,10 @@ test_data_config = dict(
 
 data = dict(
     samples_per_gpu=4,
-    workers_per_gpu=8,
+    workers_per_gpu=6,
     train=dict(
         data_root=data_root,
-        ann_file=data_root + 'bevdetv3-lidarseg-nuscenes-semi_infos_train.pkl',
+        ann_file=data_root + 'bevdetv3-lidarseg-nuscenes_infos_train.pkl',
         pipeline=train_pipeline,
         classes=class_names,
         test_mode=False,
