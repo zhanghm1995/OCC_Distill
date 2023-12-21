@@ -153,7 +153,7 @@ class NeRFVisualizer(object):
                          render_img_gt,
                          flip_dx, flip_dy,
                          intricics, pose_spatial,
-                         save_dir="./"):
+                         save_dir="./results"):
         """Visualize the occupancy semantic voxels
 
         Args:
@@ -193,7 +193,7 @@ class NeRFVisualizer(object):
         render_color = rearrange(render_color, 'b num_cam c h w -> b num_cam h w c')[0]
         render_semantic = rearrange(render_semantic, 'b num_cam c h w -> b num_cam h w c')[0]
 
-        print('render_depth', render_depth.shape, render_depth.max(), render_depth.min())  # [1, 6, 224, 352]
+        print('render_depth', render_depth.shape, render_depth.max(), render_depth.min())  # [b, num_cam, h, w]
         current_frame_img = render_img_gt.view(
             batch_size, 6, num_frame, -1, 
             render_img_gt.shape[-2], render_img_gt.shape[-1])[0, :, 0].cpu().numpy()
@@ -443,7 +443,8 @@ class MyBEVStereo4DOCCNeRFVisualizer(BEVStereo4D):
         if True:  # DEBUG ONLY!
             # to (b, 1, 200, 200, 16)
             visualizer = NeRFVisualizer()
-            visualizer.visualize_gt_occ(self.NeRFDecoder, self.num_frame,
+            visualizer.visualize_gt_occ(self.NeRFDecoder, 
+                                        self.num_frame,
                                         voxel_semantics,
                                         render_img_gt, flip_dx, flip_dy,
                                         intricics, pose_spatial)

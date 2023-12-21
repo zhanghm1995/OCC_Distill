@@ -47,14 +47,13 @@ test_pipeline = [
         load_dim=5,
         use_dim=5,
         file_client_args=file_client_args),
-    dict(type='PointToEgo'),
+    # dict(type='PointToEgo'),
     dict(
         type='MultiScaleFlipAug3D',
         img_scale=(1333, 800),
         pts_scale_ratio=1,
         flip=False,
         transforms=[
-            dict(type='PointsRangeFilter', point_cloud_range=point_cloud_range),
             dict(
                 type='DefaultFormatBundle3D',
                 class_names=class_names,
@@ -80,11 +79,11 @@ share_data_config = dict(
 
 test_data_config = dict(
     pipeline=test_pipeline,
-    ann_file=data_root + 'bevdetv2-nuscenes_infos_val-quarter.pkl')
+    ann_file=data_root + 'bevdetv2-nuscenes_infos_val.pkl')
 
 data = dict(
     samples_per_gpu=4,
-    workers_per_gpu=16,
+    workers_per_gpu=6,
     train=dict(
         data_root=data_root,
         ann_file=data_root + 'bevdetv3-lidarseg-nuscenes_infos_train-quarter.pkl',
