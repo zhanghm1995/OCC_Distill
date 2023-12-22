@@ -2,9 +2,9 @@
 Copyright (c) 2023 by Haiming Zhang. All Rights Reserved.
 
 Author: Haiming Zhang
-Date: 2023-08-09 17:01:29
+Date: 2023-12-11 18:01:59
 Email: haimingzhang@link.cuhk.edu.cn
-Description: 
+Description: Using the neus SDF to replace the density field.
 '''
 
 _base_ = ['../_base_/datasets/nus-3d.py', '../_base_/default_runtime.py']
@@ -83,7 +83,7 @@ model = dict(
         stepsize=grid_config['depth'][2],
         voxels_size=voxel_size,
         mode='bilinear',  # ['bilinear', 'nearest']
-        render_type='prob',  # ['prob', 'density']
+        render_type='neus',  # ['prob', 'density']
         # render_size=data_config['input_size'],
         render_size=data_config['render_size'],
         depth_range=grid_config['depth'][:2],

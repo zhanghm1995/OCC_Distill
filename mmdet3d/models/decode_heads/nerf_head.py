@@ -16,7 +16,6 @@ import os
 import os.path as osp
 import time
 from torch_scatter import segment_coo
-
 from mmdet3d.models.builder import HEADS
 from mmdet3d.models.losses.lovasz_loss import lovasz_softmax
 from mmdet3d.models.nerf.utils import Raw2Alpha, Alphas2Weights
@@ -99,6 +98,27 @@ def get_rays_of_a_view(H, W, K, c2w, inverse_y, flip_x, flip_y, mode='center'):
 
     return rays_o_all, rays_d_all
 
+
+class SingleVarianceNetwork(nn.Module):
+    """Variance network in NeuS"""
+
+    def __init__(self, init_val):
+        super(SingleVarianceNetwork, self).__init__()
+        self.register_parameter(
+            "variance", nn.Parameter(init_val * torch.ones(1), requires_grad=True)
+        )
+
+    def forward(self, x):
+        """Returns current variance value"""
+        return torch.ones([len(x), 1], device=x.device) * torch.exp(
+            self.variance * 10.0
+        )
+
+    def get_variance(self):
+        """return current variance value"""
+        return torch.exp(self.variance * 10.0).clip(1e-6, 1e6)
+
+
 @HEADS.register_module()
 class NeRFDecoderHead(nn.Module):
     def __init__(self, 
@@ -145,7 +165,10 @@ class NeRFDecoderHead(nn.Module):
 
         N_samples = int(np.linalg.norm(np.array([voxels_size[0] // 2, voxels_size[1] // 2, voxels_size[2] // 2]) + 1) / self.stepsize) + 1
         self.register_buffer('rng', torch.arange(N_samples)[None].float())
-        # print('rng', self.rng)
+
+        if self.render_type == 'neus':
+            # deviation_network to compute alpha from sdf from NeuS
+            self.deviation_network = SingleVarianceNetwork(init_val=0.3)
 
     def grid_sampler(self, xyz, grid, align_corners=True, mode='bilinear'):
         '''Wrapper for the interp operation'''
@@ -157,6 +180,31 @@ class NeRFDecoderHead(nn.Module):
         ret_lst = ret_lst.reshape(grid.shape[1], -1).T.reshape(*shape, grid.shape[1]).squeeze()
         return ret_lst
 
+    def interpolate_feats(self, xyz, feats_volume):
+        from smooth_sampler import SmoothSampler
+        
+        shape = xyz.shape[:-1]
+        xyz = xyz.reshape(1, 1, 1, -1, 3)
+        feats_volume = feats_volume.unsqueeze(0)
+        ind_norm = ((xyz - self.xyz_min) / (self.xyz_max - self.xyz_min)).flip((-1,)) * 2 - 1  # XYZ
+        if False:
+            from mmdet3d.ops.cuda_gridsample_grad2 import cuda_gridsample as cudagrid
+            feats = cudagrid.grid_sample_3d(
+                feats_volume, ind_norm.float(), align_corners=True, padding_mode="border"
+            )
+            feats = feats.reshape(feats_volume.shape[1], -1).T.reshape(*shape, feats_volume.shape[1]).squeeze()
+        else:
+            feats = SmoothSampler.apply(
+                    feats_volume,
+                    ind_norm.float(),
+                    "zeros",
+                    True,
+                    False,
+                )
+        
+        feats = feats.reshape(feats_volume.shape[1], -1).T.reshape(*shape, feats_volume.shape[1]).squeeze()
+        return feats
+    
     @staticmethod
     def construct_ray_warps(fn, t_near, t_far):
         """Construct a bijection between metric distances and normalized distances.
@@ -257,7 +305,10 @@ class NeRFDecoderHead(nn.Module):
                 rays_o_i, rays_d_i, is_train=is_train, nonlinear_sample=nonlinear_sample)
 
         mask_rays_pts = rays_pts[~mask_outbbox]
-        density = self.grid_sampler(mask_rays_pts, voxel, mode=mode)
+        mask_rays_pts.requires_grad_(True)
+        # density = self.grid_sampler(mask_rays_pts, voxel, mode=mode)
+        with torch.enable_grad():
+            density = self.interpolate_feats(mask_rays_pts, voxel)
 
         if self.render_type == 'prob':
             probs = torch.zeros_like(rays_pts[..., 0])
@@ -316,6 +367,75 @@ class NeRFDecoderHead(nn.Module):
             else:
                 semantic_marched = depth
             
+            rgb_marched = depth  # TODO: add rgb_marched
+        elif self.render_type == 'neus':
+            z_vals = interval.expand(rays_pts.shape[:2])
+            dists = z_vals[..., 1:] - z_vals[..., :-1]
+            dists = torch.cat([dists, dists[0, -1].expand(dists[...,:1].shape)], -1)  # [N_rays, N_samples]
+            dists = dists[~mask_outbbox]
+            
+            sdf = density  # (N, M)
+            sdf = sdf[..., None]
+
+            d_output = torch.ones_like(sdf, requires_grad=False, device=sdf.device)
+            gradients = torch.autograd.grad(
+                outputs=sdf,
+                inputs=mask_rays_pts,
+                grad_outputs=d_output,
+                create_graph=True,
+                retain_graph=True,
+                only_inputs=True,
+            )[0]
+
+            inv_s = self.deviation_network.get_variance()  # Single parameter
+            
+            dirs = rays_d_i[:, None].expand(rays_pts.shape)[~mask_outbbox]
+            true_cos = (dirs * gradients).sum(-1, keepdim=True)
+
+            cos_anneal_ratio = 1.0
+            # "cos_anneal_ratio" grows from 0 to 1 in the beginning training iterations. The anneal strategy below makes
+            # the cos value "not dead" at the beginning training iterations, for better convergence.
+            iter_cos = -(F.relu(-true_cos * 0.5 + 0.5) * (1.0 - cos_anneal_ratio) +
+                        F.relu(-true_cos) * cos_anneal_ratio)  # always non-positive
+
+            # Estimate signed distances at section points
+            estimated_next_sdf = sdf + iter_cos * dists.reshape(-1, 1) * 0.5
+            estimated_prev_sdf = sdf - iter_cos * dists.reshape(-1, 1) * 0.5
+
+            prev_cdf = torch.sigmoid(estimated_prev_sdf * inv_s)
+            next_cdf = torch.sigmoid(estimated_next_sdf * inv_s)
+
+            p = prev_cdf - next_cdf
+            c = prev_cdf
+
+            alpha = ((p + 1e-5) / (c + 1e-5)).clip(0.0, 1.0)
+
+            alpha_raw = torch.zeros_like(rays_pts[..., 0])
+            alpha_raw[~mask_outbbox] = alpha[:, 0]  # (N, M)
+            transmittance = torch.cumprod(
+                torch.cat([torch.ones([*alpha_raw.shape[:1], 1], device=alpha_raw.device), 
+                           1. - alpha_raw + 1e-7], -1), -1)
+            weights = alpha_raw * transmittance[:, :-1]
+            
+            eps = 1e-10
+            depth = torch.sum(weights * interval, dim=1) / (torch.sum(weights, 1) + eps)
+            depth = torch.clip(depth, interval.min(), interval.max())
+
+            if self.semantic_head:
+                semantic = self.interpolate_feats(mask_rays_pts, semantic_recon)
+
+                B, N = rays_pts.shape[:2]
+                semantic_cache = torch.zeros((B, N, semantic_recon.shape[0])).to(rays_pts.device)
+                semantic_cache[~mask_outbbox] = semantic  # (N, C)
+                semantic_marched = torch.sum(weights[..., None] * semantic_cache, -2)
+            else:
+                semantic_marched = depth
+
+            # eikonal_loss
+            eikonal_loss = ((gradients.norm(2, dim=-1) - 1) ** 2).mean()
+            loss_dict = dict()
+            loss_dict['eikonal_loss'] = eikonal_loss
+
             rgb_marched = depth  # TODO: add rgb_marched
 
         elif self.render_type == 'density':
