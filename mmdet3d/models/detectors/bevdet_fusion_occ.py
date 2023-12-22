@@ -84,11 +84,11 @@ class BEVFusionStereo4DOCCNeRF(BEVFusionStereo4DOCC):
             visualizer = NeRFVisualizer()
             visualizer.visualize_gt_occ(self.NeRFDecoder, 
                                         self.num_frame,
-                                        occ_res,
+                                        voxel_semantics,
                                         render_img_gt, 
                                         flip_dx, flip_dy,
                                         intricics, pose_spatial,
-                                        save_dir="./AAAI_visualization/teacher-25-gt-depth")
+                                        save_dir="./results/AAAI_visualization/teacher-4264-gt-depth")
             exit()
         
         occ_res = occ_res.squeeze(dim=0).cpu().numpy().astype(np.uint8)

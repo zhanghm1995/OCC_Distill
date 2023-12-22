@@ -1019,6 +1019,12 @@ if __name__ == "__main__":
     # save_projected_point_cloud(pickle_path, sample_idx=4540)
     # exit()
 
+    sample_camera_images(pickle_path, 
+                         sample_idx=4264, 
+                         need_camera_directory=False,
+                         save_root="./results/AAAI_visualization/4264")
+    exit()
+
     process_linked_sam_mask(save_root="./results/cvpr_figure3")
     exit()
 
@@ -1037,11 +1043,7 @@ if __name__ == "__main__":
     save_all_cam_cat_images(pickle_path, save_root="./aaai_all_validation_cat_debug")
     exit(0)
 
-    sample_camera_images(pickle_path, 
-                         sample_idx=4165, 
-                         need_camera_directory=False,
-                         save_root="./AAAI_visualization/4165")
-    exit()
+    
 
     pickle_path = "data/nuscenes/bevdetv3-lidarseg-nuscenes_infos_train.pkl"
     sample_camera_images_from_token(pickle_path,
