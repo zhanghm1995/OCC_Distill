@@ -14,7 +14,8 @@ from nuscenes import NuScenes
 
 
 def frame_idx_to_scene_name_and_scene_token(anno_file, 
-                                            save_root="./data/nuscenes"):
+                                            save_root="./data/nuscenes",
+                                            split='train'):
     with open(anno_file, "rb") as fp:
         dataset = pickle.load(fp)
     
@@ -41,7 +42,7 @@ def frame_idx_to_scene_name_and_scene_token(anno_file,
     if save_root is not None:
         output_str = "\n".join(output_str_list)
         
-        save_file = osp.join(save_root, "frame_idx_2_secene_info.txt")
+        save_file = osp.join(save_root, f"frame_idx_2_secene_info_{split}.txt")
         with open(save_file, "w") as fp:
             fp.write(output_str)
 
@@ -75,8 +76,11 @@ if __name__ == "__main__":
     pickle_path = "data/nuscenes/bevdetv3-lidarseg-nuscenes_infos_val.pkl"
     pickle_path = "data/nuscenes/bevdetv3-lidartoken-nuscenes_infos_val.pkl"
 
-    pickle_path = "data/nuscenes/bevdetv3-lidarseg-nuscenes_infos_train.pkl"
-    frame_idx_to_scene_name_and_scene_token(pickle_path)
+    pickle_path = "data/nuscenes/bevdetv3-lidarseg-nuscenes_infos_train-quarter.pkl"
+    # frame_idx_to_sample_token(pickle_path, save_root="./data/nuscenes", split='train_quarter')
+    # exit()
+
+    frame_idx_to_scene_name_and_scene_token(pickle_path, split='train_quarter')
     exit()
 
     pickle_path = "/data1/zhanghm/Code/Occupancy/Occ_Challenge/data/nuscenes/bevdetv2-lidarseg-nuscenes_infos_trainvaltest.pkl"

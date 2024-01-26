@@ -15,13 +15,13 @@ from PIL import Image
 import cv2
 from matplotlib import pyplot as plt
 
-from mmdet3d.models.decode_heads.nerf_head import visualize_depth
-
 
 def main():
-    teacher_depth_path = "AAAI_visualization/teacher-4250-depth/01_rendered_depth.npy"
-    student_depth_path = "AAAI_visualization/student-4250-depth/01_rendered_depth.npy"
-    student_depth_path = "AAAI_visualization/teacher-4250-12e-depth/01_rendered_depth.npy"
+    data_root = "./results/AAAI_visualization"
+    frame_idx = 4264
+    teacher_depth_path = osp.join(data_root, f"teacher-{frame_idx}-depth/01_rendered_depth.npy")
+    student_depth_path = osp.join(data_root, f"student-{frame_idx}-depth/01_rendered_depth.npy")
+    # student_depth_path = "AAAI_visualization/teacher-4250-12e-depth/01_rendered_depth.npy"
 
     teacher_depth = np.load(teacher_depth_path)
     student_depth = np.load(student_depth_path)

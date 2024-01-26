@@ -1034,7 +1034,7 @@ class BEVStereo4DSSCOCCNeRF(BEVStereo4D):
                                         render_img_gt,
                                         flip_dx, flip_dy,
                                         intricics, pose_spatial,
-                                        save_dir="./AAAI_visualization/student-25-depth")
+                                        save_dir="./results/AAAI_visualization/student-4264-depth-new")
             exit()
             
         occ_res = occ_res.squeeze(dim=0).cpu().numpy().astype(np.uint8)
