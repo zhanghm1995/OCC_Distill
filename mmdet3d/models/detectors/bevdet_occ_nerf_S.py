@@ -440,7 +440,7 @@ class MyBEVStereo4DOCCNeRF(BEVStereo4D):
         occ_res = occ_res.squeeze(dim=0).cpu().numpy().astype(np.uint8)
 
         ## nerf
-        VISUALIZE = False
+        VISUALIZE = True
         if VISUALIZE:
             # to (b, c, 200, 200, 16)
             use_gt_occ = False
@@ -547,23 +547,27 @@ class MyBEVStereo4DOCCNeRF(BEVStereo4D):
         losses.update(loss_occ)
 
         # NeRF loss
-        if False:  # DEBUG ONLY!
-            density_prob = kwargs['voxel_semantics'].unsqueeze(1)
-            # img_semantic = kwargs['img_semantic']
-            density_prob = density_prob != 17
+        if True:  # DEBUG ONLY!
+            voxel_semantics = kwargs['voxel_semantics'].unsqueeze(1) # (bs, 1, 200, 200, 16)
+
+            density_prob = voxel_semantics != 17
             density_prob = density_prob.float()
             density_prob[density_prob == 0] = -10  # scaling to avoid 0 in alphas
             density_prob[density_prob == 1] = 10
             batch_size = density_prob.shape[0]
             density_prob_flip = self.inverse_flip_aug(density_prob, flip_dx, flip_dy)
-            print(density_prob_flip.shape)
+
+            voxel_semantics_flip = self.inverse_flip_aug(voxel_semantics, flip_dx, flip_dy)
+            print(density_prob_flip.shape, voxel_semantics_flip.shape)
 
             # nerf decoder
             render_depth, _, _ = self.NeRFDecoder(
                 density_prob_flip,
                 density_prob_flip.tile(1, 3, 1, 1, 1),
-                density_prob_flip.tile(1, self.NeRFDecoder.semantic_dim, 1, 1, 1),
-                intricics, pose_spatial, True
+                voxel_semantics_flip,
+                intricics, 
+                pose_spatial, 
+                is_train=True
             )
             print('density_prob', density_prob.shape)  # [1, 1, 200, 200, 16]
             print('render_depth', render_depth.shape, render_depth.max(), render_depth.min())  # [1, 6, 224, 352]
