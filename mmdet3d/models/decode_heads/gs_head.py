@@ -64,6 +64,7 @@ class GaussianSplattingDecoder(NeRFDecoderHead):
                 occ_semantic, 
                 intricics, 
                 pose_spatial, 
+                is_train,
                 render_mask=None,
                 **kwargs):
         print('density_prob', density_prob.shape)

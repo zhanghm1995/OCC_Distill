@@ -547,7 +547,7 @@ class MyBEVStereo4DOCCNeRF(BEVStereo4D):
         losses.update(loss_occ)
 
         # NeRF loss
-        if True:  # DEBUG ONLY!
+        if False:  # DEBUG ONLY!
             voxel_semantics = kwargs['voxel_semantics'].unsqueeze(1) # (bs, 1, 200, 200, 16)
 
             density_prob = voxel_semantics != 17
