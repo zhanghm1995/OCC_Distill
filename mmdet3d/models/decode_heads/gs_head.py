@@ -101,7 +101,7 @@ class GaussianSplattingDecoder(NeRFDecoderHead):
             intricics,
             pose_spatial,
         )
-        render_depth = render_depth.unsqueeze(0)
+        render_depth = render_depth.unsqueeze(0).clamp(1.0, None)
         semantic_pred = semantic_pred.unsqueeze(0)
         return render_depth, semantic_pred, None
 
@@ -178,7 +178,7 @@ class GaussianSplattingDecoder(NeRFDecoderHead):
         # harmonics = torch.ones_like(xyzs).unsqueeze(-1)
         gaussians.harmonics = harmonics ######## Gaussian harmonics ########
 
-        color = render_cuda(
+        color, depth = render_cuda(
             rearrange(extrinsics, "b v i j -> (b v) i j"),
             rearrange(intrinsics, "b v i j -> (b v) i j"),
             rearrange(near, "b v -> (b v)"),
@@ -193,17 +193,4 @@ class GaussianSplattingDecoder(NeRFDecoderHead):
             use_sh=False,
         )
 
-        depth = render_depth_cuda2(
-            rearrange(extrinsics, "b v i j -> (b v) i j"),
-            rearrange(intrinsics, "b v i j -> (b v) i j"),
-            rearrange(near, "b v -> (b v)"),
-            rearrange(far, "b v -> (b v)"),
-            (self.render_h, self.render_w),
-            repeat(gaussians.means, "b g xyz -> (b v) g xyz", v=v),
-            repeat(gaussians.covariances, "b g i j -> (b v) g i j", v=v),
-            repeat(gaussians.opacities, "b g -> (b v) g", v=v),
-            mode="depth",
-            scale_invariant=False,
-
-        )
-        return color, depth
+        return color, depth.squeeze(1)
