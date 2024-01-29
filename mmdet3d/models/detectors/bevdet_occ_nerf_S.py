@@ -547,7 +547,7 @@ class MyBEVStereo4DOCCNeRF(BEVStereo4D):
         losses.update(loss_occ)
 
         # NeRF loss
-        if False:  # DEBUG ONLY!
+        if True:  # DEBUG ONLY!
             voxel_semantics = kwargs['voxel_semantics'].unsqueeze(1) # (bs, 1, 200, 200, 16)
 
             density_prob = voxel_semantics != 17
@@ -561,7 +561,7 @@ class MyBEVStereo4DOCCNeRF(BEVStereo4D):
             print(density_prob_flip.shape, voxel_semantics_flip.shape)
 
             # nerf decoder
-            render_depth, _, _ = self.NeRFDecoder(
+            render_depth, render_rgb, _ = self.NeRFDecoder(
                 density_prob_flip,
                 density_prob_flip.tile(1, 3, 1, 1, 1),
                 voxel_semantics_flip,
@@ -570,11 +570,20 @@ class MyBEVStereo4DOCCNeRF(BEVStereo4D):
                 is_train=True
             )
             print('density_prob', density_prob.shape)  # [1, 1, 200, 200, 16]
-            print('render_depth', render_depth.shape, render_depth.max(), render_depth.min())  # [1, 6, 224, 352]
+            print('render_depth', render_depth.shape, render_depth.min(), render_depth.max())  # [1, 6, 224, 352]
+            print('render_rgb', render_rgb.shape, render_rgb.min(), render_rgb.max())
             print('gt_depth', gt_depth.shape, gt_depth.max(), gt_depth.min())  # [1, 6, 384, 704]
-            current_frame_img = render_img_gt.view(batch_size, 6, self.num_frame, -1, render_img_gt.shape[-2], render_img_gt.shape[-1])[0, :, 0].cpu().numpy()
-            print(current_frame_img.shape)
+            current_frame_img = render_img_gt.view(batch_size, 6, self.num_frame, -1, 
+                                                   render_img_gt.shape[-2], 
+                                                   render_img_gt.shape[-1])[0, :, 0].cpu().numpy()
+            print('current_frame_img', current_frame_img.shape)
+            ## start visualize the results
             self.NeRFDecoder.visualize_image_depth_pair(current_frame_img, render_gt_depth[0], render_depth[0])
+            self.NeRFDecoder.visualize_image_semantic_depth_pair(
+                current_frame_img, 
+                render_rgb.permute(0, 1, 3, 4, 2)[0], 
+                render_depth[0],
+                save_dir="./results/3dgs")
             exit()
 
         else:

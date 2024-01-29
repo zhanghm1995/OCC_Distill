@@ -19,7 +19,7 @@ from mmdet3d.models.builder import HEADS
 
 from mmdet3d.models.decode_heads.nerf_head import NeRFDecoderHead
 from .common.gaussians import build_covariance
-from .common.cuda_splatting import render_cuda, render_depth_cuda
+from .common.cuda_splatting import render_cuda, render_depth_cuda, render_depth_cuda2
 
 
 class Gaussians:
@@ -58,6 +58,30 @@ class GaussianSplattingDecoder(NeRFDecoderHead):
             (0, 0, 0), # ignore
         ])
 
+        self.OCC3D_PALETTE = torch.Tensor([
+            [0, 0, 0],
+            [255, 120, 50],  # barrier              orangey
+            [255, 192, 203],  # bicycle              pink
+            [255, 255, 0],  # bus                  yellow
+            [0, 150, 245],  # car                  blue
+            [0, 255, 255],  # construction_vehicle cyan
+            [200, 180, 0],  # motorcycle           dark orange
+            [255, 0, 0],  # pedestrian           red
+            [255, 240, 150],  # traffic_cone         light yellow
+            [135, 60, 0],  # trailer              brown
+            [160, 32, 240],  # truck                purple
+            [255, 0, 255],  # driveable_surface    dark pink
+            [139, 137, 137], # other_flat           dark grey
+            [75, 0, 75],  # sidewalk             dard purple
+            [150, 240, 80],  # terrain              light green
+            [230, 230, 250],  # manmade              white
+            [0, 175, 0],  # vegetation           green
+            [0, 255, 127],  # ego car              dark cyan
+            [255, 99, 71],
+            [0, 191, 255],
+            [125, 125, 125]
+        ])
+
     def forward(self, 
                 density_prob, 
                 rgb_recon,
@@ -78,7 +102,7 @@ class GaussianSplattingDecoder(NeRFDecoderHead):
             pose_spatial,
         )
         render_depth = render_depth.unsqueeze(0)
-        semantic_pred = semantic_pred.unsqueeze(0).clamp(0, 1)
+        semantic_pred = semantic_pred.unsqueeze(0)
         return render_depth, semantic_pred, None
 
     def gaussian_rasterization(self, 
@@ -95,22 +119,26 @@ class GaussianSplattingDecoder(NeRFDecoderHead):
         background_color = torch.zeros((3), dtype=torch.float32).to(density_prob.device)
         
         intrinsics = intrinsics[..., :3, :3]
-        intrinsics[..., 0, :] /= 100
-        intrinsics[...,1, :] /= 100
+        # normalize the intrinsics
+        intrinsics[..., 0, :] /= self.render_w
+        intrinsics[..., 1, :] /= self.render_h
 
-        transform = torch.Tensor(np.diag([1, 1, 1, 1])).to(density_prob.device)
+        transform = torch.Tensor([[0, 1, 0, 0],
+                                  [1, 0, 0, 0],
+                                  [0, 0, 1, 0],
+                                  [0, 0, 0, 1]]).to(density_prob.device)
         extrinsics = transform.unsqueeze(0).unsqueeze(0) @ extrinsics
 
         device = density_prob.device
-        xs = torch.range(
+        xs = torch.arange(
             self.xyz_min[0], self.xyz_max[0],
-            (self.xyz_max[0] - self.xyz_min[0]) / density_prob.shape[2], device=device)[:-1]
-        ys = torch.range(
+            (self.xyz_max[0] - self.xyz_min[0]) / density_prob.shape[2], device=device)
+        ys = torch.arange(
             self.xyz_min[1], self.xyz_max[1],
-            (self.xyz_max[1] - self.xyz_min[1]) / density_prob.shape[3], device=device)[:-1]
-        zs = torch.range(
+            (self.xyz_max[1] - self.xyz_min[1]) / density_prob.shape[3], device=device)
+        zs = torch.arange(
             self.xyz_min[2], self.xyz_max[2],
-            (self.xyz_max[2] - self.xyz_min[2]) / density_prob.shape[4], device=device)[:-1]
+            (self.xyz_max[2] - self.xyz_min[2]) / density_prob.shape[4], device=device)
         W, H, D = len(xs), len(ys), len(zs)
         
         bs = density_prob.shape[0]
@@ -124,7 +152,7 @@ class GaussianSplattingDecoder(NeRFDecoderHead):
         mask = (density_prob > 0) #& (semantic_pred.flatten()==3)
         xyzs = xyzs[mask]
 
-        harmonics = self.NUSCENSE_LIDARSEG_PALETTE[semantic_pred.long().flatten()].to(device)
+        harmonics = self.OCC3D_PALETTE[semantic_pred.long().flatten()].to(device)
         harmonics = harmonics[mask]
 
         density_prob = density_prob[mask]
@@ -165,7 +193,7 @@ class GaussianSplattingDecoder(NeRFDecoderHead):
             use_sh=False,
         )
 
-        depth = render_depth_cuda(
+        depth = render_depth_cuda2(
             rearrange(extrinsics, "b v i j -> (b v) i j"),
             rearrange(intrinsics, "b v i j -> (b v) i j"),
             rearrange(near, "b v -> (b v)"),
@@ -174,7 +202,7 @@ class GaussianSplattingDecoder(NeRFDecoderHead):
             repeat(gaussians.means, "b g xyz -> (b v) g xyz", v=v),
             repeat(gaussians.covariances, "b g i j -> (b v) g i j", v=v),
             repeat(gaussians.opacities, "b g -> (b v) g", v=v),
-            mode="disparity",
+            mode="depth",
             scale_invariant=False,
 
         )

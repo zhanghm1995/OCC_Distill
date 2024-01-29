@@ -614,7 +614,8 @@ class NeRFDecoderHead(nn.Module):
                                    images, 
                                    depth_gt, 
                                    render,
-                                   save_path=None):
+                                   save_path=None,
+                                   save_dir=None):
         '''
         Visualize the camera image, sparse GT depth and the rendered dense depth map.
         Args:
@@ -660,11 +661,11 @@ class NeRFDecoderHead(nn.Module):
                 ax[i, j].axis('off')
 
         plt.subplots_adjust(wspace=0.01, hspace=0.01)
-        # plt.show()
-        save_dir= "./results"
+
+        save_dir = "./results" if save_dir is None else save_dir
         os.makedirs(save_dir, exist_ok=True)
-        full_img_path = osp.join(save_dir, f"gt_rendered_depth_{time.time()}.png") \
-            if save_path is None else save_path
+
+        full_img_path = osp.join(save_dir, f"image_depth_pair_{time.time()}.png")
         plt.savefig(full_img_path)
 
 
@@ -747,8 +748,13 @@ class NeRFDecoderHead(nn.Module):
 
         concated_render_list = []
         concated_image_list = []
-        semantic = semantic.cpu().numpy()
-        render = render.cpu().numpy()
+        
+        ## check if is Tensor, if not, convert to Tensor
+        if torch.is_tensor(semantic):
+            semantic = semantic.detach().cpu().numpy()
+        
+        if torch.is_tensor(render):
+            render = render.detach().cpu().numpy()
 
         for b in range(len(images)):
             visual_img = cv2.resize(images[b].transpose((1, 2, 0)), (semantic.shape[-2], semantic.shape[-3]))
@@ -781,6 +787,7 @@ class NeRFDecoderHead(nn.Module):
 
             full_img_path = osp.join(save_dir, '%f.png' % time.time())
             plt.savefig(full_img_path)
+            return
 
             for i in range(len(concated_render_list)):
                 depth_map = concated_render_list[i].astype(np.uint8)
