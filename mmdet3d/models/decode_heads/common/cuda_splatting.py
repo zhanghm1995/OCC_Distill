@@ -2,7 +2,7 @@ from math import isqrt
 from typing import Literal
 
 import torch
-from diff_gaussian_rasterization import (
+from diff_gauss import (
     GaussianRasterizationSettings,
     GaussianRasterizer,
 )
@@ -57,6 +57,7 @@ def render_cuda(
     gaussian_opacities, # : Float[Tensor, "batch gaussian"],
     scale_invariant: bool = True,
     use_sh: bool = True,
+    feats3D: Tensor = None,
 ): # -> Float[Tensor, "batch 3 height width"]:
     assert use_sh or gaussian_sh_coefficients.shape[-1] == 1
 
@@ -89,6 +90,7 @@ def render_cuda(
     all_images = []
     all_radii = []
     all_depth = []
+    all_feats = []
     for i in range(b):
         # Set up a tensor for the gradients of the screen-space means.
         mean_gradients = torch.zeros_like(gaussian_means[i], requires_grad=True)
@@ -115,20 +117,38 @@ def render_cuda(
 
         row, col = torch.triu_indices(3, 3)
 
-        image, radii, depth = rasterizer(
-            means3D=gaussian_means[i],
-            means2D=mean_gradients,
-            shs=shs[i] if use_sh else None,
-            colors_precomp=None if use_sh else shs[i, :, 0, :],
-            opacities=gaussian_opacities[i, ..., None],
-            cov3D_precomp=gaussian_covariances[i, :, row, col],
-        )
+        if feats3D is None:
+            image, radii, depth = rasterizer(
+                means3D=gaussian_means[i],
+                means2D=mean_gradients,
+                shs=shs[i] if use_sh else None,
+                colors_precomp=None if use_sh else shs[i, :, 0, :],
+                opacities=gaussian_opacities[i, ..., None],
+                cov3D_precomp=gaussian_covariances[i, :, row, col],
+            )
+        else:
+            image, feats, depth, alpha, radii = rasterizer(
+                means3D=gaussian_means[i],
+                means2D=mean_gradients,
+                shs=shs[i] if use_sh else None,
+                colors_precomp=None if use_sh else shs[i, :, 0, :],
+                opacities=gaussian_opacities[i, ..., None],
+                cov3D_precomp=gaussian_covariances[i, :, row, col],
+                feats3D=feats3D[i],
+            )
+            all_feats.append(feats)
         all_images.append(image)
         all_radii.append(radii)
         all_depth.append(depth)
+    
     image_batch = torch.stack(all_images)
     depth_batch = torch.stack(all_depth)
-    return image_batch, depth_batch
+    
+    if feats3D is None:
+        return image_batch, depth_batch
+    else:
+        feats_batch = torch.stack(all_feats)
+        return image_batch, depth_batch, feats_batch
 
 
 def render_cuda_orthographic(

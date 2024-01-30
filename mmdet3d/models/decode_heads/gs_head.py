@@ -119,7 +119,7 @@ class GaussianSplattingDecoder(NeRFDecoderHead):
         # print('density_prob', density_prob.shape)
         # print('rgb_recon', rgb_recon.shape)
         # print('occ_semantic', occ_semantic.shape) # (1, 1, 200, 200, 16)
-        semantic_pred, render_depth = self.train_gaussian_rasterization(
+        render_depth, render_rgb, render_semantic = self.train_gaussian_rasterization(
             density_prob,
             rgb_recon,  # pseudo color
             occ_semantic,
@@ -127,7 +127,7 @@ class GaussianSplattingDecoder(NeRFDecoderHead):
             pose_spatial,
         )
         render_depth = render_depth.clamp(self.min_depth, self.max_depth)
-        return render_depth, semantic_pred, None
+        return render_depth, render_rgb, render_semantic
 
     def train_gaussian_rasterization(self, 
                                      density_prob, 
@@ -159,12 +159,13 @@ class GaussianSplattingDecoder(NeRFDecoderHead):
         xyzs = repeat(self.volume_xyz, 'h w d dim3 -> bs h w d dim3', bs=bs)
         xyzs = rearrange(xyzs, 'b h w d dim3 -> b (h w d) dim3') # (bs, num, 3)
 
+        if self.semantic_head:
+            semantic_pred = rearrange(semantic_pred, 'b c h w d -> b (h w d) c')
+
         density_prob = rearrange(density_prob, 'b dim1 h w d -> (b dim1) (h w d)')
         
-        if self.semantic_head:
-            harmonics = self.OCC3D_PALETTE[semantic_pred.long().flatten()].to(device)
-        else:
-            harmonics = self.OCC3D_PALETTE[torch.argmax(rgb_recon, dim=1).long()].to(device)
+        ## TODO: the harmonics is a dummy variable
+        harmonics = self.OCC3D_PALETTE[torch.argmax(rgb_recon, dim=1).long()].to(device)
         harmonics = rearrange(harmonics, 'b h w d dim3 -> b (h w d) dim3 ()')
 
         g = xyzs.shape[1]
@@ -184,7 +185,7 @@ class GaussianSplattingDecoder(NeRFDecoderHead):
 
         gaussians.harmonics = harmonics ######## Gaussian harmonics ########
 
-        color, depth = render_cuda(
+        render_results = render_cuda(
             rearrange(extrinsics, "b v i j -> (b v) i j"),
             rearrange(intrinsics, "b v i j -> (b v) i j"),
             rearrange(near, "b v -> (b v)"),
@@ -197,11 +198,19 @@ class GaussianSplattingDecoder(NeRFDecoderHead):
             repeat(gaussians.opacities, "b g -> (b v) g", v=v),
             scale_invariant=False,
             use_sh=False,
+            feats3D=repeat(semantic_pred, "b g c -> (b v) g c", v=v) if self.semantic_head else None,
         )
+        if self.semantic_head:
+            color, depth, feats = render_results
+            feats = rearrange(feats, "(b v) c h w -> b v c h w", b=b, v=v)
+        else:
+            color, depth = render_results
+            feats = None
+        
         color = rearrange(color, "(b v) c h w -> b v c h w", b=b, v=v)
         depth = rearrange(depth, "(b v) c h w -> b v c h w", b=b, v=v).squeeze(2)
 
-        return color, depth
+        return depth, color, feats
     
     def gaussian_rasterization(self, 
                                density_prob, 
