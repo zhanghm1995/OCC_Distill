@@ -34,8 +34,33 @@ class Gaussians:
 @HEADS.register_module()
 class GaussianSplattingDecoder(NeRFDecoderHead):
     def __init__(self,
+                 volume_size=(200, 200, 16),
                  **kwargs):
         super().__init__(**kwargs)
+
+        xs = torch.arange(
+            self.xyz_min[0], self.xyz_max[0],
+            (self.xyz_max[0] - self.xyz_min[0]) / volume_size[0])
+        ys = torch.arange(
+            self.xyz_min[1], self.xyz_max[1],
+            (self.xyz_max[1] - self.xyz_min[1]) / volume_size[1])
+        zs = torch.arange(
+            self.xyz_min[2], self.xyz_max[2],
+            (self.xyz_max[2] - self.xyz_min[2]) / volume_size[2])
+        W, H, D = len(xs), len(ys), len(zs)
+
+        xyzs = torch.stack([
+            xs[None, :, None].expand(H, W, D),
+            ys[:, None, None].expand(H, W, D),
+            zs[None, None, :].expand(H, W, D)
+        ], dim=-1)  # (200, 200, 16, 3)
+
+        # the volume grid coordinates in ego frame
+        self.register_buffer(
+            "volume_xyz",
+            torch.tensor(xyzs, dtype=torch.float32),
+            persistent=False,
+        )
 
         self.NUSCENSE_LIDARSEG_PALETTE = torch.Tensor([
             (0, 0, 0),  # noise
@@ -91,20 +116,93 @@ class GaussianSplattingDecoder(NeRFDecoderHead):
                 is_train,
                 render_mask=None,
                 **kwargs):
-        print('density_prob', density_prob.shape)
-        print('rgb_recon', rgb_recon.shape)
-        print('occ_semantic', occ_semantic.shape)
-        semantic_pred, render_depth = self.gaussian_rasterization(
+        # print('density_prob', density_prob.shape)
+        # print('rgb_recon', rgb_recon.shape)
+        # print('occ_semantic', occ_semantic.shape) # (1, 1, 200, 200, 16)
+        semantic_pred, render_depth = self.train_gaussian_rasterization(
             density_prob,
             rgb_recon,  # pseudo color
             occ_semantic,
             intricics,
             pose_spatial,
         )
-        render_depth = render_depth.unsqueeze(0).clamp(1.0, None)
-        semantic_pred = semantic_pred.unsqueeze(0)
+        render_depth = render_depth.clamp(self.min_depth, self.max_depth)
         return render_depth, semantic_pred, None
 
+    def train_gaussian_rasterization(self, 
+                                     density_prob, 
+                                     rgb_recon, 
+                                     semantic_pred, 
+                                     intrinsics, 
+                                     extrinsics, 
+                                     render_mask=None):
+        b, v = intrinsics.shape[:2]
+        device = density_prob.device
+        
+        near = torch.ones(b, v).to(device) * self.min_depth
+        far = torch.ones(b, v).to(device) * self.max_depth
+        background_color = torch.zeros((3), dtype=torch.float32).to(device)
+        
+        intrinsics = intrinsics[..., :3, :3]
+        # normalize the intrinsics
+        intrinsics[..., 0, :] /= self.render_w
+        intrinsics[..., 1, :] /= self.render_h
+
+        transform = torch.Tensor([[0, 1, 0, 0],
+                                  [1, 0, 0, 0],
+                                  [0, 0, 1, 0],
+                                  [0, 0, 0, 1]]).to(device)
+        extrinsics = transform.unsqueeze(0).unsqueeze(0) @ extrinsics
+        
+        bs = density_prob.shape[0]
+
+        xyzs = repeat(self.volume_xyz, 'h w d dim3 -> bs h w d dim3', bs=bs)
+        xyzs = rearrange(xyzs, 'b h w d dim3 -> b (h w d) dim3') # (bs, num, 3)
+
+        density_prob = rearrange(density_prob, 'b dim1 h w d -> (b dim1) (h w d)')
+        
+        if self.semantic_head:
+            harmonics = self.OCC3D_PALETTE[semantic_pred.long().flatten()].to(device)
+        else:
+            harmonics = self.OCC3D_PALETTE[torch.argmax(rgb_recon, dim=1).long()].to(device)
+        harmonics = rearrange(harmonics, 'b h w d dim3 -> b (h w d) dim3 ()')
+
+        g = xyzs.shape[1]
+
+        gaussians = Gaussians
+        gaussians.means = xyzs  ######## Gaussian center ########
+        gaussians.opacities = torch.sigmoid(density_prob) ######## Gaussian opacities ########
+
+        scales = torch.ones(3).unsqueeze(0).to(device) * 0.05
+        rotations = torch.Tensor([1, 0, 0, 0]).unsqueeze(0).to(device)
+
+        # Create world-space covariance matrices.
+        covariances = build_covariance(scales, rotations)
+        c2w_rotations = extrinsics[..., :3, :3]
+        covariances = c2w_rotations @ covariances @ c2w_rotations.transpose(-1, -2)
+        gaussians.covariances = covariances ######## Gaussian covariances ########
+
+        gaussians.harmonics = harmonics ######## Gaussian harmonics ########
+
+        color, depth = render_cuda(
+            rearrange(extrinsics, "b v i j -> (b v) i j"),
+            rearrange(intrinsics, "b v i j -> (b v) i j"),
+            rearrange(near, "b v -> (b v)"),
+            rearrange(far, "b v -> (b v)"),
+            (self.render_h, self.render_w),
+            repeat(background_color, "c -> (b v) c", b=b, v=v),
+            repeat(gaussians.means, "b g xyz -> (b v) g xyz", v=v),
+            repeat(gaussians.covariances, "b v i j -> (b v) g i j", g=g),
+            repeat(gaussians.harmonics, "b g c d_sh -> (b v) g c d_sh", v=v),
+            repeat(gaussians.opacities, "b g -> (b v) g", v=v),
+            scale_invariant=False,
+            use_sh=False,
+        )
+        color = rearrange(color, "(b v) c h w -> b v c h w", b=b, v=v)
+        depth = rearrange(depth, "(b v) c h w -> b v c h w", b=b, v=v).squeeze(2)
+
+        return color, depth
+    
     def gaussian_rasterization(self, 
                                density_prob, 
                                rgb_recon, 

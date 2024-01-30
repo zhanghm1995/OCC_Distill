@@ -7,6 +7,7 @@ from .bevdet_occ_nerf_S_v1 import MyBEVStereo4DOCCNeRFV1
 from .bevdet_occ_nerf_S_visualizer import MyBEVStereo4DOCCNeRFVisualizer
 from .bevdet_occ_pretrain import BEVStereo4DOCCPretrain, BEVStereo4DOCCTemporalNeRFPretrain, BEVStereo4DOCCTemporalNeRFPretrainV2, BEVStereo4DOCCTemporalNeRFPretrainV3
 from .bevdet_occ_ssc import BEVFusionStereo4DSSCOCC
+from .bevdet_occ_gs import BEVStereo4DOCCGS
 from .bevdet_fusion_occ import BEVFusionStereo4DOCCNeRF
 from .bevdet_lidar_occ import BEVLidarOCC, LidarOCC
 from .render_occ import BEVDetRenderOcc
