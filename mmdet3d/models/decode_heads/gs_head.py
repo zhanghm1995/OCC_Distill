@@ -58,7 +58,7 @@ class GaussianSplattingDecoder(NeRFDecoderHead):
         # the volume grid coordinates in ego frame
         self.register_buffer(
             "volume_xyz",
-            torch.tensor(xyzs, dtype=torch.float32),
+            xyzs.to(torch.float32),
             persistent=False,
         )
 
@@ -115,16 +115,18 @@ class GaussianSplattingDecoder(NeRFDecoderHead):
                 pose_spatial, 
                 is_train,
                 render_mask=None,
+                vis_semantic=False,
                 **kwargs):
         # print('density_prob', density_prob.shape)
         # print('rgb_recon', rgb_recon.shape)
         # print('occ_semantic', occ_semantic.shape) # (1, 1, 200, 200, 16)
         render_depth, render_rgb, render_semantic = self.train_gaussian_rasterization(
             density_prob,
-            rgb_recon,  # pseudo color
+            rgb_recon,
             occ_semantic,
             intricics,
             pose_spatial,
+            vis_semantic=vis_semantic
         )
         render_depth = render_depth.clamp(self.min_depth, self.max_depth)
         return render_depth, render_rgb, render_semantic
@@ -135,7 +137,8 @@ class GaussianSplattingDecoder(NeRFDecoderHead):
                                      semantic_pred, 
                                      intrinsics, 
                                      extrinsics, 
-                                     render_mask=None):
+                                     render_mask=None,
+                                     vis_semantic=False):
         b, v = intrinsics.shape[:2]
         device = density_prob.device
         
@@ -164,9 +167,12 @@ class GaussianSplattingDecoder(NeRFDecoderHead):
 
         density_prob = rearrange(density_prob, 'b dim1 h w d -> (b dim1) (h w d)')
         
-        ## TODO: the harmonics is a dummy variable
-        harmonics = self.OCC3D_PALETTE[torch.argmax(rgb_recon, dim=1).long()].to(device)
-        harmonics = rearrange(harmonics, 'b h w d dim3 -> b (h w d) dim3 ()')
+        if vis_semantic:
+            harmonics = rearrange(rgb_recon, 'b dim3 h w d -> b (h w d) dim3 ()')
+        else:
+            ## TODO: currently the harmonics is a dummy variable when training
+            harmonics = self.OCC3D_PALETTE[torch.argmax(rgb_recon, dim=1).long()].to(device)
+            harmonics = rearrange(harmonics, 'b h w d dim3 -> b (h w d) dim3 ()')
 
         g = xyzs.shape[1]
 

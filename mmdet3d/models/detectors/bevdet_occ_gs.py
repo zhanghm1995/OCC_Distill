@@ -43,6 +43,30 @@ NUSCENSE_LIDARSEG_PALETTE = torch.Tensor([
     (0, 175, 0)
 ])
 
+OCC3D_PALETTE = torch.Tensor([
+    [0, 0, 0],
+    [255, 120, 50],  # barrier              orangey
+    [255, 192, 203],  # bicycle              pink
+    [255, 255, 0],  # bus                  yellow
+    [0, 150, 245],  # car                  blue
+    [0, 255, 255],  # construction_vehicle cyan
+    [200, 180, 0],  # motorcycle           dark orange
+    [255, 0, 0],  # pedestrian           red
+    [255, 240, 150],  # traffic_cone         light yellow
+    [135, 60, 0],  # trailer              brown
+    [160, 32, 240],  # truck                purple
+    [255, 0, 255],  # driveable_surface    dark pink
+    [139, 137, 137], # other_flat           dark grey
+    [75, 0, 75],  # sidewalk             dard purple
+    [150, 240, 80],  # terrain              light green
+    [230, 230, 250],  # manmade              white
+    [0, 175, 0],  # vegetation           green
+    [0, 255, 127],  # ego car              dark cyan
+    [255, 99, 71],
+    [0, 191, 255],
+    [125, 125, 125]
+])
+
 
 @DETECTORS.register_module()
 class BEVStereo4DOCCGS(BEVStereo4D):
@@ -134,7 +158,7 @@ class BEVStereo4DOCCGS(BEVStereo4D):
             occ_pred_ori = self.predicter(occ_pred_ori)
         
         occ_pred = occ_pred_ori[..., :-3] \
-            if self.NeRFDecoder.img_recon_head else occ_pred_ori
+            if self.render_head.img_recon_head else occ_pred_ori
 
         occ_score = occ_pred.softmax(-1)
         occ_res = occ_score.argmax(-1)
@@ -149,11 +173,11 @@ class BEVStereo4DOCCGS(BEVStereo4D):
             occ_pred = occ_pred_ori.permute(0, 4, 1, 2, 3)
 
             # semantic
-            if self.NeRFDecoder.semantic_head:
+            if self.render_head.semantic_head:
                 # (b, 17, 200, 200, 16)
-                semantic = occ_pred[:, :self.NeRFDecoder.semantic_dim, ...]
+                semantic_ori = occ_pred[:, :self.render_head.semantic_dim, ...]
             else:
-                semantic = torch.zeros_like(occ_pred[:, :self.NeRFDecoder.semantic_dim, ...])
+                semantic_ori = torch.zeros_like(occ_pred[:, :self.render_head.semantic_dim, ...])
             # density
             if use_gt_occ:
                 # (b, 200, 200, 16)
@@ -163,22 +187,25 @@ class BEVStereo4DOCCGS(BEVStereo4D):
                 density_prob[density_prob == 0] = -10  # scaling to avoid 0 in alphas
                 density_prob[density_prob == 1] = 10
             else:
-                density_prob = -occ_pred[:, self.NeRFDecoder.semantic_dim: self.NeRFDecoder.semantic_dim+1]
+                density_prob = -occ_pred[:, self.render_head.semantic_dim:self.render_head.semantic_dim+1]
 
             intricics = kwargs['intricics']
             pose_spatial = kwargs['pose_spatial']
             rgb_recons = occ_pred[:, -3:]
 
             ## firstly we need to find the semantic class for each voxel
-            semantic = semantic.argmax(1)
-            # mapping the color
-            semantic = NUSCENSE_LIDARSEG_PALETTE[semantic].to(occ_pred)  # to (6, h, w, 3)
+            semantic = semantic_ori.argmax(1)
+            # mapping the color, to (b, h, w, d, 3)
+            if use_gt_occ:
+                semantic = OCC3D_PALETTE[kwargs['voxel_semantics'][0].long()].to(occ_pred)
+            else:
+                semantic = OCC3D_PALETTE[semantic].to(occ_pred)
             semantic = semantic.permute(0, 4, 1, 2, 3)
 
-            render_depth, rgb_pred, semantic_pred = self.NeRFDecoder(
-                density_prob, rgb_recons, semantic, 
+            render_depth, rgb_pred, semantic_pred = self.render_head(
+                density_prob, semantic, semantic_ori, 
                 intricics[0], pose_spatial[0], 
-                is_train=False, render_mask=None)
+                is_train=False, render_mask=None, vis_semantic=True)
             
             render_img_gt = kwargs['render_gt_img'][0]
             current_frame_img = render_img_gt.view(
@@ -187,11 +214,11 @@ class BEVStereo4DOCCGS(BEVStereo4D):
                 render_img_gt.shape[-1])[:, 0].cpu().numpy()
             # sem = semantic_pred[0].argmax(1)  # to (6, H, W)
             # sem_color = NUSCENSE_LIDARSEG_PALETTE[sem]  # to (6, h, w, 3)
-            self.NeRFDecoder.visualize_image_semantic_depth_pair(
+            self.render_head.visualize_image_semantic_depth_pair(
                 current_frame_img,
-                semantic_pred[0].permute(0, 2, 3, 1),
+                rgb_pred[0].permute(0, 2, 3, 1),
                 render_depth[0],
-                save=True
+                save_dir="results/3dgs/overfitting"
             )
         return [occ_res]
 
@@ -244,8 +271,9 @@ class BEVStereo4DOCCGS(BEVStereo4D):
         # occupancy losses
         if self.render_head.img_recon_head:
             occ_pred = occ_pred[..., :-3]
-        loss_occ = self.loss_single(voxel_semantics, mask_camera, occ_pred)
-        losses.update(loss_occ)
+            
+        # loss_occ = self.loss_single(voxel_semantics, mask_camera, occ_pred)
+        # losses.update(loss_occ)
 
         # NeRF loss
         if False:  # DEBUG ONLY!

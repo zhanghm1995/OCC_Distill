@@ -177,6 +177,7 @@ train_pipeline = [
 
 test_pipeline = [
     dict(type='PrepareImageInputsForNeRF', data_config=data_config, sequential=True),
+    dict(type='LoadOccGTFromFile'),
     dict(
         type='LoadAnnotationsBEVDepth',
         bda_aug_conf=bda_aug_conf,
@@ -188,6 +189,10 @@ test_pipeline = [
         load_dim=5,
         use_dim=5,
         file_client_args=file_client_args),
+    dict(type='PointToMultiViewDepthForNeRF', downsample=1, grid_config=grid_config, 
+         render_size=data_config['render_size'],
+         render_scale=[data_config['render_size'][0]/data_config['src_size'][0], 
+                       data_config['render_size'][1]/data_config['src_size'][1]]),
     dict(
         type='MultiScaleFlipAug3D',
         img_scale=(1333, 800),
@@ -198,7 +203,9 @@ test_pipeline = [
                 type='DefaultFormatBundle3D',
                 class_names=class_names,
                 with_label=False),
-            dict(type='Collect3D', keys=['points', 'img_inputs'])
+            dict(type='Collect3D', keys=['points', 'img_inputs',
+                                         'intricics', 'pose_spatial',
+                                         'voxel_semantics', 'render_gt_img'])
         ])
 ]
 
@@ -221,7 +228,7 @@ share_data_config = dict(
 
 test_data_config = dict(
     pipeline=test_pipeline,
-    ann_file=data_root + 'bevdetv3-lidarseg-nuscenes_infos_val.pkl')
+    ann_file=data_root + 'bevdetv3-lidarseg-nuscenes_infos_train-quarter.pkl')
 
 data = dict(
     samples_per_gpu=4,
