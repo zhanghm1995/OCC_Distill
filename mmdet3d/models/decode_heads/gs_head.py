@@ -20,6 +20,7 @@ from mmdet3d.models.builder import HEADS
 from mmdet3d.models.decode_heads.nerf_head import NeRFDecoderHead
 from .common.gaussians import build_covariance
 from .common.cuda_splatting import render_cuda, render_depth_cuda, render_depth_cuda2
+from .common.sh_rotation import rotate_sh
 
 
 class Gaussians:
@@ -34,7 +35,13 @@ class Gaussians:
 @HEADS.register_module()
 class GaussianSplattingDecoder(NeRFDecoderHead):
     def __init__(self,
+                 gs_scale_min=0.1,
+                 gs_scale_max=0.24,
+                 sh_degree=4,
                  volume_size=(200, 200, 16),
+                 use_gs_predictor=False,
+                 in_channels=32,
+                 num_surfaces=1,
                  **kwargs):
         super().__init__(**kwargs)
 
@@ -62,26 +69,17 @@ class GaussianSplattingDecoder(NeRFDecoderHead):
             persistent=False,
         )
 
-        self.NUSCENSE_LIDARSEG_PALETTE = torch.Tensor([
-            (0, 0, 0),  # noise
-            (112, 128, 144),  # barrier
-            (220, 20, 60),  # bicycle
-            (255, 127, 80),  # bus
-            (255, 158, 0),  # car
-            (233, 150, 70),  # construction_vehicle
-            (255, 61, 99),  # motorcycle
-            (0, 0, 230),  # pedestrian
-            (47, 79, 79),  # traffic_cone
-            (255, 140, 0),  # trailer
-            (255, 99, 71),  # Tomato
-            (0, 207, 191),  # nuTonomy green
-            (175, 0, 75),
-            (75, 0, 75),
-            (112, 180, 60),
-            (222, 184, 135),  # Burlywood
-            (0, 175, 0),
-            (0, 0, 0), # ignore
-        ])
+        self.gs_scale_min = gs_scale_min
+        self.gs_scale_max = gs_scale_max
+        self.d_sh = (sh_degree + 1) ** 2
+
+        self.register_buffer(
+            "sh_mask",
+            torch.ones((self.d_sh,), dtype=torch.float32),
+            persistent=False,
+        )
+        for degree in range(1, sh_degree + 1):
+            self.sh_mask[degree**2 : (degree + 1) ** 2] = 0.1 * 0.25**degree
 
         self.OCC3D_PALETTE = torch.Tensor([
             [0, 0, 0],
@@ -107,26 +105,49 @@ class GaussianSplattingDecoder(NeRFDecoderHead):
             [125, 125, 125]
         ])
 
+        self.use_gs_predictor = use_gs_predictor
+        if use_gs_predictor:
+            self.to_gaussians = nn.Sequential(
+                nn.ReLU(),
+                nn.Linear(
+                    in_channels,
+                    num_surfaces * (3 + 3 + 4 + 3 * self.d_sh)
+                )
+            )
+
     def forward(self, 
                 density_prob, 
                 rgb_recon,
                 occ_semantic, 
                 intricics, 
                 pose_spatial, 
-                is_train,
+                volume_feat=None,
                 render_mask=None,
                 vis_semantic=False,
                 **kwargs):
-        # print('density_prob', density_prob.shape)
-        # print('rgb_recon', rgb_recon.shape)
-        # print('occ_semantic', occ_semantic.shape) # (1, 1, 200, 200, 16)
-        render_depth, render_rgb, render_semantic = self.train_gaussian_rasterization(
+        """Foward function
+
+        Args:
+            density_prob (Tensor): (bs, 1, 200, 200, 16)
+            rgb_recon (Tensor): (bs, 3, 200, 200, 16)
+            occ_semantic (Tensor): (bs, c, 200, 200, 16)
+            intricics (Tensor): (bs, num_view, 4, 4)
+            pose_spatial (Tensor): (bs, num_view, 4, 4)
+            volume_feat (Tensor): (bs, 200, 200, 16, c)
+            render_mask (_type_, optional): _description_. Defaults to None.
+            vis_semantic (bool, optional): Use for visualization debug. Defaults to False.
+
+        Returns:
+            Tuple: rendered depth, rgb images and semantic features
+        """
+        render_depth, render_rgb, render_semantic = self.train_gaussian_rasterization_v2(
             density_prob,
             rgb_recon,
             occ_semantic,
             intricics,
             pose_spatial,
-            vis_semantic=vis_semantic
+            vis_semantic=vis_semantic,
+            volume_feat=volume_feat
         )
         render_depth = render_depth.clamp(self.min_depth, self.max_depth)
         return render_depth, render_rgb, render_semantic
@@ -138,7 +159,8 @@ class GaussianSplattingDecoder(NeRFDecoderHead):
                                      intrinsics, 
                                      extrinsics, 
                                      render_mask=None,
-                                     vis_semantic=False):
+                                     vis_semantic=False,
+                                     **kwargs):
         b, v = intrinsics.shape[:2]
         device = density_prob.device
         
@@ -180,7 +202,7 @@ class GaussianSplattingDecoder(NeRFDecoderHead):
         gaussians.means = xyzs  ######## Gaussian center ########
         gaussians.opacities = torch.sigmoid(density_prob) ######## Gaussian opacities ########
 
-        scales = torch.ones(3).unsqueeze(0).to(device) * 0.05
+        scales = torch.ones(3).unsqueeze(0).to(device) * 0.2
         rotations = torch.Tensor([1, 0, 0, 0]).unsqueeze(0).to(device)
 
         # Create world-space covariance matrices.
@@ -217,6 +239,152 @@ class GaussianSplattingDecoder(NeRFDecoderHead):
         depth = rearrange(depth, "(b v) c h w -> b v c h w", b=b, v=v).squeeze(2)
 
         return depth, color, feats
+    
+    def loss(self,
+             pred_dict,
+             target_dict):
+        
+        losses = dict()
+
+        render_depth = pred_dict['render_depth']
+        gt_depth = target_dict['render_gt_depth']
+
+        loss_render_depth = self.compute_depth_loss(
+            render_depth, gt_depth, gt_depth > 0.0)
+        if torch.isnan(loss_render_depth):
+            print('NaN in render depth loss!')
+            loss_render_depth = torch.Tensor([0.0]).to(render_depth.device)
+        losses['loss_render_depth'] = loss_render_depth
+
+        if self.semantic_head:
+            assert 'img_semantic' in target_dict.keys()
+            img_semantic = target_dict['img_semantic']
+
+            semantic_pred = pred_dict['render_semantic']
+            
+            loss_render_sem = self.compute_semantic_loss(semantic_pred, img_semantic)
+            if torch.isnan(loss_render_sem):
+                print('NaN in render semantic loss!')
+                loss_render_sem = torch.Tensor([0.0]).to(render_depth.device)
+            losses['loss_render_sem'] = loss_render_sem
+
+        return losses
+
+    def train_gaussian_rasterization_v2(self, 
+                                        density_prob, 
+                                        rgb_recon, 
+                                        semantic_pred, 
+                                        intrinsics, 
+                                        extrinsics, 
+                                        volume_feat=None,
+                                        render_mask=None,
+                                        vis_semantic=False):
+        b, v = intrinsics.shape[:2]
+        device = density_prob.device
+        
+        near = torch.ones(b, v).to(device) * self.min_depth
+        far = torch.ones(b, v).to(device) * self.max_depth
+        background_color = torch.zeros((3), dtype=torch.float32).to(device)
+        
+        intrinsics = intrinsics[..., :3, :3]
+        # normalize the intrinsics
+        intrinsics[..., 0, :] /= self.render_w
+        intrinsics[..., 1, :] /= self.render_h
+
+        transform = torch.Tensor([[0, 1, 0, 0],
+                                  [1, 0, 0, 0],
+                                  [0, 0, 1, 0],
+                                  [0, 0, 0, 1]]).to(device)
+        extrinsics = transform.unsqueeze(0).unsqueeze(0) @ extrinsics
+        
+        density_prob = rearrange(density_prob, 'b dim1 h w d -> (b dim1) (h w d)')
+
+        if self.semantic_head:
+            semantic_pred = rearrange(semantic_pred, 'b c h w d -> b (h w d) c')
+
+        gaussians = self.predict_gaussian(density_prob,
+                                          extrinsics,
+                                          volume_feat)
+        render_results = render_cuda(
+            rearrange(extrinsics, "b v i j -> (b v) i j"),
+            rearrange(intrinsics, "b v i j -> (b v) i j"),
+            rearrange(near, "b v -> (b v)"),
+            rearrange(far, "b v -> (b v)"),
+            (self.render_h, self.render_w),
+            repeat(background_color, "c -> (b v) c", b=b, v=v),
+            repeat(gaussians.means, "b g xyz -> (b v) g xyz", v=v),
+            rearrange(gaussians.covariances, "b v g i j -> (b v) g i j"),
+            rearrange(gaussians.harmonics, "b v g c d_sh -> (b v) g c d_sh"),
+            repeat(gaussians.opacities, "b g -> (b v) g", v=v),
+            scale_invariant=False,
+            use_sh=True,
+            feats3D=repeat(semantic_pred, "b g c -> (b v) g c", v=v)
+        )
+        if self.semantic_head:
+            color, depth, feats = render_results
+            feats = rearrange(feats, "(b v) c h w -> b v c h w", b=b, v=v)
+        else:
+            color, depth = render_results
+            feats = None
+        
+        color = rearrange(color, "(b v) c h w -> b v c h w", b=b, v=v)
+        depth = rearrange(depth, "(b v) c h w -> b v c h w", b=b, v=v).squeeze(2)
+
+        return depth, color, feats
+    
+    def predict_gaussian(self,
+                         density_prob,
+                         extrinsics,
+                         volume_feat=None):
+        
+        bs, v = extrinsics.shape[:2]
+
+        xyzs = repeat(self.volume_xyz, 'h w d dim3 -> bs h w d dim3', bs=bs)
+        xyzs = rearrange(xyzs, 'b h w d dim3 -> b (h w d) dim3') # (bs, num, 3)
+
+        if self.use_gs_predictor:
+            assert volume_feat is not None
+
+            raw_gaussians = self.to_gaussians(volume_feat)
+            raw_gaussians = rearrange(raw_gaussians, 'b h w d c -> b (h w d) c')
+            xyz_offset, scales, rotations, sh = raw_gaussians.split(
+                (3, 3, 4, 3 * self.d_sh), dim=-1)
+            
+            # construct 3D Gaussians
+            gaussians = Gaussians
+            gaussians.means = xyzs + xyz_offset.clip(-0.5, 0.5)
+
+            # Map scale features to valid scale range.
+            scale_min = self.gs_scale_min
+            scale_max = self.gs_scale_max
+            scales = scale_min + (scale_max - scale_min) * torch.sigmoid(scales)
+
+            # Normalize the quaternion features to yield a valid quaternion.
+            rotations = rotations / (rotations.norm(dim=-1, keepdim=True) + 1e-8)
+
+            # Apply sigmoid to get valid colors.
+            sh = rearrange(sh, "... (xyz d_sh) -> ... xyz d_sh", xyz=3)
+            gaussians.opacities = torch.sigmoid(density_prob)
+            sh = sh.broadcast_to((*gaussians.opacities.shape, 3, self.d_sh)) * self.sh_mask
+            sh = repeat(sh, 'b g xyz d_sh -> b v g xyz d_sh', v=v)
+
+            # Create world-space covariance matrices.
+            covariances = build_covariance(scales, rotations)
+            covariances = rearrange(covariances, "b g i j -> b () g i j")
+
+            c2w_rotations = extrinsics[..., :3, :3]
+            c2w_rotations = rearrange(c2w_rotations, "b v i j -> b v () i j")
+            covariances = c2w_rotations @ covariances @ c2w_rotations.transpose(-1, -2)
+            gaussians.covariances = covariances  # (bs, v, g, i, j)
+
+            ## TODO: rotate_sh cause assert due to extrinsics coordinate denifition
+            # harmonics = rotate_sh(sh, c2w_rotations[..., None, :, :])
+            gaussians.harmonics = sh
+        
+            return gaussians
+        else:
+            raise NotImplementedError
+
     
     def gaussian_rasterization(self, 
                                density_prob, 

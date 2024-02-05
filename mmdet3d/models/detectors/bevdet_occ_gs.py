@@ -78,7 +78,6 @@ class BEVStereo4DOCCGS(BEVStereo4D):
                  use_mask=False,
                  num_classes=18,
                  use_predicter=True,
-                 class_wise=False,
                  scene_filter_index=-1,
                  return_weights=False,
                  use_render_loss=True,
@@ -116,10 +115,17 @@ class BEVStereo4DOCCGS(BEVStereo4D):
         self.pts_bbox_head = None
         self.use_mask = use_mask
         self.num_random_view = self.render_head.num_random_view
-        self.loss_occ = build_loss(loss_occ)
-        self.class_wise = class_wise
+        
+        if loss_occ is not None:
+            self.loss_occ = build_loss(loss_occ)
+        
         self.align_after_view_transfromation = False
         self.use_render_loss = use_render_loss
+
+    @property
+    def with_occ_loss(self):
+        """bool: Whether compute the occupancy loss with Occupancy GT supervision."""
+        return hasattr(self, 'loss_occ') and self.loss_occ is not None
 
     def loss_single(self, voxel_semantics, mask_camera, preds, semi_mask=None):
         loss_ = dict()
@@ -151,11 +157,13 @@ class BEVStereo4DOCCGS(BEVStereo4D):
         """Test function without augmentaiton."""
         img_feats, _, _ = self.extract_feat(
             points, img=img, img_metas=img_metas, **kwargs)
-        occ_pred_ori = self.final_conv(img_feats[0]).permute(0, 4, 3, 2, 1)
+        volume_feat = self.final_conv(img_feats[0]).permute(0, 4, 3, 2, 1)
 
         if self.use_predicter:
             # to (b, 200, 200, 16, c)
-            occ_pred_ori = self.predicter(occ_pred_ori)
+            occ_pred_ori = self.predicter(volume_feat)
+        else:
+            occ_pred_ori = volume_feat
         
         occ_pred = occ_pred_ori[..., :-3] \
             if self.render_head.img_recon_head else occ_pred_ori
@@ -205,21 +213,21 @@ class BEVStereo4DOCCGS(BEVStereo4D):
             render_depth, rgb_pred, semantic_pred = self.render_head(
                 density_prob, semantic, semantic_ori, 
                 intricics[0], pose_spatial[0], 
-                is_train=False, render_mask=None, vis_semantic=True)
+                is_train=False, render_mask=None, 
+                vis_semantic=True, volume_feat=volume_feat)
             
             render_img_gt = kwargs['render_gt_img'][0]
             current_frame_img = render_img_gt.view(
                 6, self.num_frame, -1, 
                 render_img_gt.shape[-2], 
                 render_img_gt.shape[-1])[:, 0].cpu().numpy()
-            # sem = semantic_pred[0].argmax(1)  # to (6, H, W)
-            # sem_color = NUSCENSE_LIDARSEG_PALETTE[sem]  # to (6, h, w, 3)
             self.render_head.visualize_image_semantic_depth_pair(
                 current_frame_img,
                 rgb_pred[0].permute(0, 2, 3, 1),
                 render_depth[0],
-                save_dir="results/3dgs/overfitting"
+                save_dir="results/3dgs/baseline_overfit"
             )
+            exit()
         return [occ_res]
 
     @staticmethod
@@ -261,9 +269,13 @@ class BEVStereo4DOCCGS(BEVStereo4D):
         render_gt_depth = kwargs['render_gt_depth']
 
         # occupancy prediction
-        occ_pred = self.final_conv(img_feats[0]).permute(0, 4, 3, 2, 1)  # bncdhw->bnwhdc
+        volume_feat = self.final_conv(img_feats[0]).permute(0, 4, 3, 2, 1)  # to (bs, 200, 200, 16, c)
+        
         if self.use_predicter:
-            occ_pred = self.predicter(occ_pred)
+            occ_pred = self.predicter(volume_feat)
+        else:
+            occ_pred = volume_feat
+        
         voxel_semantics = kwargs['voxel_semantics']
         mask_camera = kwargs['mask_camera']
         assert voxel_semantics.min() >= 0 and voxel_semantics.max() <= 17
@@ -272,8 +284,9 @@ class BEVStereo4DOCCGS(BEVStereo4D):
         if self.render_head.img_recon_head:
             occ_pred = occ_pred[..., :-3]
             
-        # loss_occ = self.loss_single(voxel_semantics, mask_camera, occ_pred)
-        # losses.update(loss_occ)
+        if self.with_occ_loss:
+            loss_occ = self.loss_single(voxel_semantics, mask_camera, occ_pred)
+            losses.update(loss_occ)
 
         # NeRF loss
         if False:  # DEBUG ONLY!
@@ -352,82 +365,19 @@ class BEVStereo4DOCCGS(BEVStereo4D):
             # import time
             # torch.cuda.synchronize()
             # start = time.time()
-            if self.render_head.mask_render:
-                render_mask = render_gt_depth > 0.0
-                render_depth, rgb_pred, semantic_pred = self.render_head(
-                    density_prob_flip, rgb_flip, semantic_flip, 
-                    intricics, pose_spatial, True, render_mask)
-                # torch.cuda.synchronize()
-                # end = time.time()
-                # print("inference time:", end - start)
+            render_depth, rgb_pred, semantic_pred = self.render_head(
+                density_prob_flip, rgb_flip, semantic_flip, 
+                intricics, pose_spatial, 
+                volume_feat=volume_feat)
+            # torch.cuda.synchronize()
+            # end = time.time()
+            # print("inference time:", end - start)
 
-                render_gt_depth = render_gt_depth[render_mask]
-                loss_nerf = self.render_head.compute_depth_loss(
-                    render_depth, render_gt_depth, render_gt_depth > 0.0)
-                if torch.isnan(loss_nerf):
-                    print('NaN in DepthNeRF loss!')
-                    loss_nerf = loss_depth
-                losses['loss_nerf'] = loss_nerf
+            pred_dict = {'render_depth': render_depth,
+                            'render_semantic': semantic_pred}
 
-                if self.render_head.semantic_head:
-                    img_semantic = kwargs['img_semantic']
-                    img_semantic = img_semantic[render_mask]
-                    loss_nerf_sem = self.render_head.compute_semantic_loss_flatten(
-                        semantic_pred, img_semantic, lovasz=self.lovasz)
-                    if torch.isnan(loss_nerf):
-                        print('NaN in SemNeRF loss!')
-                        loss_nerf_sem = loss_depth
-                    losses['loss_nerf_sem'] = loss_nerf_sem
-
-                if self.render_head.img_recon_head:
-                    batch_size, num_camera = intricics.shape[:2]
-                    img_gts = render_img_gt.view(
-                        batch_size, num_camera, self.num_frame, -1, 
-                        render_img_gt.shape[-2], render_img_gt.shape[-1])[:, :, 0]
-                    img_gts = img_gts.permute(0, 1, 3, 4, 2)[render_mask]
-                    loss_nerf_img = self.render_head.compute_image_loss(
-                        rgb_pred, img_gts)
-                    if torch.isnan(loss_nerf):
-                        print('NaN in ImgNeRF loss!')
-                        loss_nerf_img = loss_depth
-                    losses['loss_nerf_img'] = loss_nerf_img
-
-            else:
-                render_depth, rgb_pred, semantic_pred = self.render_head(
-                    density_prob_flip, rgb_flip, 
-                    semantic_flip, intricics, pose_spatial, True)
-                # torch.cuda.synchronize()
-                # end = time.time()
-                # print("inference time:", end - start)
-
-                # nerf loss calculation
-                loss_nerf = self.render_head.compute_depth_loss(
-                    render_depth, render_gt_depth, render_gt_depth > 0.0)
-                if torch.isnan(loss_nerf):
-                    print('NaN in DepthNeRF loss!')
-                    loss_nerf = loss_depth
-                losses['loss_nerf'] = loss_nerf
-
-                if self.render_head.semantic_head:
-                    img_semantic = kwargs['img_semantic']
-                    if self.num_random_view != -1:
-                        img_semantic = img_semantic[:, rand_ind]
-                    loss_nerf_sem = self.render_head.compute_semantic_loss(semantic_pred, img_semantic)
-                    if torch.isnan(loss_nerf):
-                        print('NaN in SemNeRF loss!')
-                        loss_nerf_sem = loss_depth
-                    losses['loss_nerf_sem'] = loss_nerf_sem
-
-                if self.render_head.img_recon_head:
-                    img_gts = render_img_gt.view(batch_size, num_camera, 
-                                                 self.num_frame, -1, 
-                                                 render_img_gt.shape[-2], 
-                                                 render_img_gt.shape[-1])[:, :, 0]
-                    loss_nerf_img = self.render_head.compute_image_loss(rgb_pred, img_gts)
-                    if torch.isnan(loss_nerf):
-                        print('NaN in ImgNeRF loss!')
-                        loss_nerf_img = loss_depth
-                    losses['loss_nerf_img'] = loss_nerf_img
+            gs_losses = self.render_head.loss(pred_dict, dict(**kwargs))
+            losses.update(gs_losses)
 
         return losses
     

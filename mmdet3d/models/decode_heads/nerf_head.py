@@ -21,7 +21,7 @@ from mmdet3d.models.losses.lovasz_loss import lovasz_softmax
 from mmdet3d.models.nerf.utils import Raw2Alpha, Alphas2Weights
 
 
-def visualize_depth(depth, mask=None, depth_min=None, depth_max=None, direct=True):
+def visualize_depth(depth, mask=None, depth_min=None, depth_max=None, direct=False):
     """Visualize the depth map with colormap.
        Rescales the values so that depth_min and depth_max map to 0 and 1,
        respectively.
