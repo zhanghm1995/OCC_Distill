@@ -82,6 +82,27 @@ class NeRFVisualizer(object):
             (0, 175, 0),
             (0, 0, 0), # ignore
         ])
+
+        self.OCC3D_PALETTE = torch.Tensor([
+            [0, 0, 0],
+            [255, 120, 50],  # barrier              orangey
+            [255, 192, 203],  # bicycle              pink
+            [255, 255, 0],  # bus                  yellow
+            [0, 150, 245],  # car                  blue
+            [0, 255, 255],  # construction_vehicle cyan
+            [200, 180, 0],  # motorcycle           dark orange
+            [255, 0, 0],  # pedestrian           red
+            [255, 240, 150],  # traffic_cone         light yellow
+            [135, 60, 0],  # trailer              brown
+            [160, 32, 240],  # truck                purple
+            [255, 0, 255],  # driveable_surface    dark pink
+            [139, 137, 137], # other_flat           dark grey
+            [75, 0, 75],  # sidewalk             dard purple
+            [150, 240, 80],  # terrain              light green
+            [230, 230, 250],  # manmade              white
+            [0, 175, 0],  # vegetation           green
+            [0, 0, 0],  # free black
+        ])
     
     def visualize_pred_occ(self,
                            nerf_head, 
@@ -205,6 +226,92 @@ class NeRFVisualizer(object):
             render_depth[0],
             save=True,
             save_dir=save_dir)
+        
+    
+    def visualize_gt_occ_v2(self,
+                            nerf_head: NeRFDecoderHead, 
+                            voxel_semantics,
+                            kwargs,
+                            num_frame=3,
+                            save_dir="./results",
+                            color_palette='occ3d'):
+        """Visualize the occupancy semantic voxels
+
+        Args:
+            nerf_head (_type_): _description_
+            num_frame (int): _description_
+            voxel_semantics (Tensor): (b, 200, 200, 16)
+            render_img_gt (Tensor): [b, num_cam*num_frame, 3, h, w]
+            flip_dx (Tensor): _description_
+            flip_dy (Tensor): 
+            intricics (Tensor): (b, num_cam, 4, 4)
+            pose_spatial (Tensor): (b, num_cam, 4, 4)
+        """
+        ## obtain all needed elements
+        flip_dx = kwargs.get('flip_dx', [False])
+        flip_dy = kwargs.get('flip_dy', [False])
+
+        # to (b, 1, 200, 200, 16)
+        voxel_semantics = voxel_semantics.unsqueeze(1)
+
+        density_prob = voxel_semantics != 17
+        density_prob = density_prob.float()
+        density_prob[density_prob == 0] = -10  # scaling to avoid 0 in alphas
+        density_prob[density_prob == 1] = 10
+        batch_size = density_prob.shape[0]
+        density_prob_flip = inverse_flip_aug(density_prob, flip_dx, flip_dy)  # torch.Size([b, 1, 200, 200, 16])
+
+        # to (b, 1, 200, 200, 16, 3)
+        COLOR_PALETTE = self.OCC3D_PALETTE if color_palette == 'occ3d' else self.NUSCENSE_LIDARSEG_PALETTE
+        sem_color = COLOR_PALETTE[voxel_semantics.long()].cuda()
+        sem_color_flip = inverse_flip_aug(sem_color, flip_dx, flip_dy)
+        # to torch.Size([b, 3, 200, 200, 16])
+        sem_color_flip = rearrange(sem_color_flip, 'b c h w d Dim3 -> b c Dim3 h w d')[:, 0]
+
+        # nerf decoder
+        # NOTE: Here we use the RGB rendering to render the semantic map
+        intricics = kwargs['intricics'][0]  # (bs, num_view, 4, 4)
+        pose_spatial = kwargs['pose_spatial'][0]
+        render_depth, render_color, render_semantic = nerf_head(
+            density_prob_flip,
+            sem_color_flip,
+            sem_color_flip,
+            intricics, pose_spatial, True, force_render_rgb=True)
+        
+        render_color = rearrange(render_color, 'b num_cam c h w -> b num_cam h w c')[0]
+        render_semantic = rearrange(render_semantic, 'b num_cam c h w -> b num_cam h w c')[0]
+
+        print('render_depth', render_depth.shape, render_depth.max(), render_depth.min())  # [b, num_cam, h, w]
+
+        render_img_gt = kwargs['render_gt_img'][0]
+        current_frame_img = render_img_gt.view(
+            batch_size, 6, num_frame, -1, 
+            render_img_gt.shape[-2], render_img_gt.shape[-1])[0, :, 0].cpu().numpy()
+
+        ## visualize the lidar point cloud depth and lidar semantic map
+        lidar_sparse_depth = kwargs['render_gt_depth'][0]
+        lidar_sparse_semantic = kwargs['img_semantic'][0]
+        nerf_head.visualize_sparse_depth_semantic(
+            current_frame_img, 
+            lidar_sparse_depth[0], 
+            lidar_sparse_semantic[0],
+            save_dir=save_dir)
+        
+        ## visualize the depth map and semantic map
+        nerf_head.visualize_image_semantic_depth_pair(
+            current_frame_img, 
+            render_semantic, 
+            render_depth[0],
+            save=True,
+            save_dir=save_dir)
+        
+        ## visualize the lidar point cloud depth
+        render_gt_depth = kwargs['render_gt_depth'][0]
+        nerf_head.visualize_image_depth_pair(
+            current_frame_img, 
+            render_gt_depth[0], 
+            render_depth[0],
+            save_dir=save_dir)
 
 
 @DETECTORS.register_module()
@@ -319,9 +426,18 @@ class MyBEVStereo4DOCCNeRFVisualizer(BEVStereo4D):
         ## nerf
         VISUALIZE = True
         if VISUALIZE:
+            occ_res = kwargs['voxel_semantics'][0]
+
+            visualizer = NeRFVisualizer()
+            visualizer.visualize_gt_occ_v2(self.NeRFDecoder, 
+                                           occ_res,
+                                           kwargs,
+                                           save_dir="./results/ECCV")
+            exit()
             intricics = kwargs['intricics'][0]
             pose_spatial = kwargs['pose_spatial'][0]
             render_img_gt = kwargs['render_gt_img'][0]
+            occ_res = kwargs['voxel_semantics'][0]
             flip_dx = [False]
             flip_dy = [False]
 
@@ -331,7 +447,8 @@ class MyBEVStereo4DOCCNeRFVisualizer(BEVStereo4D):
                                         occ_res,
                                         render_img_gt,
                                         flip_dx, flip_dy,
-                                        intricics, pose_spatial)
+                                        intricics, pose_spatial,
+                                        save_dir="./results/eccv")
             exit()
 
             # to (b, c, 200, 200, 16)

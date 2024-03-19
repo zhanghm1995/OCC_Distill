@@ -1020,10 +1020,10 @@ if __name__ == "__main__":
     # exit()
 
     sample_camera_images(pickle_path, 
-                         sample_idx=4637, 
+                         sample_idx=2926, 
                          need_camera_directory=False,
-                         save_root="./results/visualization/4637")
-    save_point_cloud(pickle_path, sample_idx=4637)
+                         save_root="./results/visualization/2926")
+    # save_point_cloud(pickle_path, sample_idx=2920)
     exit()
 
     process_linked_sam_mask(save_root="./results/cvpr_figure3")

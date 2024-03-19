@@ -66,6 +66,10 @@ def parse_args():
         action='store_true',
         help='whether to evaluate the binary occupancy prediction,'
         ' "segm", "proposal" for COCO, and "mAP", "recall" for PASCAL VOC')
+    parser.add_argument(
+        '--eval-occ3d',
+        action='store_true',
+        help='whether to evaluate the occupancy prediction saved in occ3d folder structure,')
     parser.add_argument('--show', action='store_true', help='show results')
     parser.add_argument(
         '--show-dir', help='directory where results will be saved')
@@ -136,6 +140,19 @@ def load_offline_results(data_dir, sample_token):
     
     res = np.load(res_path)['arr_0']  # (200, 200, 16)
     return [res]
+
+
+def load_occ3d_format_results(data_dir, scene_name, sample_token):
+    res_path = os.path.join(data_dir, scene_name, sample_token, 'labels.npz')
+    # check file exist
+    assert os.path.exists(res_path), f'{res_path} does not exist'
+    
+    try:
+        res = np.load(res_path)['semantics']  # (200, 200, 16)
+    except:
+        res = np.load(res_path)['arr_0']
+    return [res]
+
 
 def load_offline_visiblity_mask_results(data_dir, sample_token):
     res_path = os.path.join(data_dir, sample_token + '.npz')
@@ -210,6 +227,11 @@ def main():
         
         if args.eval_binary:
             result = load_offline_visiblity_mask_results(args.data_dir, sample_token)
+        elif args.eval_occ3d:
+            ## evalaute the results saved in occ3d GT folder structure
+            assert 'occ_gt_path' in data.keys(), 'The dataset should have occ_gt_path'
+            scene_name = data['occ_gt_path'][0].split('/')[-2]
+            result = load_occ3d_format_results(args.data_dir, scene_name, sample_token)
         else:
             result = load_offline_results(args.data_dir, sample_token)
 
@@ -220,7 +242,7 @@ def main():
             prog_bar.update()
     
     # evaluate the results
-    dataset.evaluate(results)
+    dataset.evaluate(results, use_image_mask=True)
 
 
 if __name__ == '__main__':

@@ -15,11 +15,26 @@ import cv2
 import os
 import os.path as osp
 import time
+from PIL import Image
 from torch_scatter import segment_coo
 from mmdet3d.models.builder import HEADS
 from mmdet3d.models.losses.lovasz_loss import lovasz_softmax
 from mmdet3d.models.nerf.utils import Raw2Alpha, Alphas2Weights
 
+
+def denormalize(img, flip_rgb=True):
+    img_mean = np.array([0.485, 0.456, 0.406])[None, None, :]
+    img_std = np.array([0.229, 0.224, 0.225])[None, None, :]
+    img = np.ascontiguousarray((img * img_std + img_mean))
+    if flip_rgb:
+        img = img[..., ::-1]
+    return img
+
+
+def get_time_str():
+    now = time.time()
+    filename = time.strftime("%Y%m%d_%H%M%S_%f", time.localtime(now))
+    return filename
 
 def visualize_depth(depth, mask=None, depth_min=None, depth_max=None, direct=False):
     """Visualize the depth map with colormap.
@@ -306,9 +321,9 @@ class NeRFDecoderHead(nn.Module):
 
         mask_rays_pts = rays_pts[~mask_outbbox]
         mask_rays_pts.requires_grad_(True)
-        # density = self.grid_sampler(mask_rays_pts, voxel, mode=mode)
-        with torch.enable_grad():
-            density = self.interpolate_feats(mask_rays_pts, voxel)
+        density = self.grid_sampler(mask_rays_pts, voxel, mode=mode)
+        # with torch.enable_grad():
+        #     density = self.interpolate_feats(mask_rays_pts, voxel)
 
         if self.render_type == 'prob':
             probs = torch.zeros_like(rays_pts[..., 0])
@@ -614,7 +629,6 @@ class NeRFDecoderHead(nn.Module):
                                    images, 
                                    depth_gt, 
                                    render,
-                                   save_path=None,
                                    save_dir=None):
         '''
         Visualize the camera image, sparse GT depth and the rendered dense depth map.
@@ -665,6 +679,83 @@ class NeRFDecoderHead(nn.Module):
         save_dir = "./results" if save_dir is None else save_dir
         os.makedirs(save_dir, exist_ok=True)
 
+        full_img_path = osp.join(save_dir, f"image_depth_pair_{time.time()}.png")
+        plt.savefig(full_img_path)
+
+    def visualize_sparse_depth_semantic(self, 
+                                        images, 
+                                        sparse_depth, 
+                                        sparse_sem,
+                                        save_dir=None):
+        '''
+        Visualize the camera image, sparse GT depth and the rendered dense depth map.
+        Args:
+            images: num_camera, 3, H, W
+            sparse_depth: num_camera, H, W, the sparse depth projected by point cloud.
+            sparse_sem: num_camera, H, W
+        '''
+        import matplotlib.pyplot as plt
+        from mmdet3d.utils import turbo_colormap_data, normalize_depth, interpolate_or_clip
+
+        OCC3D_PALETTE = torch.Tensor([
+            [0, 0, 0],
+            [255, 120, 50],  # barrier              orangey
+            [255, 192, 203],  # bicycle              pink
+            [255, 255, 0],  # bus                  yellow
+            [0, 150, 245],  # car                  blue
+            [0, 255, 255],  # construction_vehicle cyan
+            [200, 180, 0],  # motorcycle           dark orange
+            [255, 0, 0],  # pedestrian           red
+            [255, 240, 150],  # traffic_cone         light yellow
+            [135, 60, 0],  # trailer              brown
+            [160, 32, 240],  # truck                purple
+            [255, 0, 255],  # driveable_surface    dark pink
+            [139, 137, 137], # other_flat           dark grey
+            [75, 0, 75],  # sidewalk             dard purple
+            [150, 240, 80],  # terrain              light green
+            [230, 230, 250],  # manmade              white
+            [0, 175, 0],  # vegetation           green
+            [0, 0, 0],  # free black
+        ])
+
+        concated_image_list = []
+        depth_gt = sparse_depth.detach().cpu().numpy()
+
+        for b in range(len(images)):
+            visual_img = cv2.resize(images[b].transpose((1, 2, 0)), 
+                                    (depth_gt.shape[-1], depth_gt.shape[-2]))
+            visual_img = denormalize(visual_img)
+            concated_image_list.append(visual_img)
+
+        normalized_voxel_depth = normalize_depth(depth_gt, d_min=self.min_depth, d_max=self.max_depth)
+        
+        fig, ax = plt.subplots(nrows=6, ncols=3, figsize=(6, 6))
+        ij = [[i, j] for i in range(2) for j in range(3)]
+        for i in range(len(ij)):
+            colors_voxel = []
+            for depth_val in normalized_voxel_depth[i][normalized_voxel_depth[i] > 0].reshape(-1):
+                colors_voxel.append(interpolate_or_clip(colormap=turbo_colormap_data, x=depth_val))
+            ax[ij[i][0], ij[i][1]].imshow(concated_image_list[i])
+            ax[ij[i][0] + 2, ij[i][1]].imshow(np.ones_like(concated_image_list[i]) * 255)
+            ax[ij[i][0] + 2, ij[i][1]].scatter(normalized_voxel_depth[i].nonzero()[1],
+                                               normalized_voxel_depth[i].nonzero()[0], 
+                                               c=colors_voxel, alpha=0.5, s=0.5)
+            colors_voxel = []
+            for sem_val in sparse_sem[i][normalized_voxel_depth[i] > 0].reshape(-1):
+                colors_voxel.append((OCC3D_PALETTE[sem_val] / 255.0).tolist())
+            ax[ij[i][0] + 4, ij[i][1]].imshow(np.ones_like(concated_image_list[i]) * 255)
+            ax[ij[i][0] + 4, ij[i][1]].scatter(normalized_voxel_depth[i].nonzero()[1],
+                                               normalized_voxel_depth[i].nonzero()[0], 
+                                               c=colors_voxel, alpha=0.5, s=0.5)
+
+            for j in range(3):
+                ax[i, j].axis('off')
+
+        plt.subplots_adjust(wspace=0.01, hspace=0.01)
+
+        save_dir = "./results" if save_dir is None else save_dir
+        os.makedirs(save_dir, exist_ok=True)
+        
         full_img_path = osp.join(save_dir, f"image_depth_pair_{time.time()}.png")
         plt.savefig(full_img_path)
 
@@ -771,7 +862,7 @@ class NeRFDecoderHead(nn.Module):
         fig, ax = plt.subplots(nrows=6, ncols=3, figsize=(6, 6))
         ij = [[i, j] for i in range(2) for j in range(3)]
         for i in range(len(ij)):
-            ax[ij[i][0], ij[i][1]].imshow(concated_image_list[i])
+            ax[ij[i][0], ij[i][1]].imshow(concated_image_list[i][..., ::-1])
             ax[ij[i][0] + 2, ij[i][1]].imshow(semantic[i]/255)
             ax[ij[i][0] + 4, ij[i][1]].imshow(concated_render_list[i]/255)
 
@@ -787,7 +878,6 @@ class NeRFDecoderHead(nn.Module):
 
             full_img_path = osp.join(save_dir, '%f.png' % time.time())
             plt.savefig(full_img_path)
-            return
 
             for i in range(len(concated_render_list)):
                 depth_map = concated_render_list[i].astype(np.uint8)

@@ -24,8 +24,9 @@ data_config = {
     'input_size': (256, 704),
     # 'input_size': (224, 352), # SMALL FOR DEBUG
     'src_size': (900, 1600),
-    'render_size': (90, 160), # SMALL FOR DEBUG
-    # 'render_size': (256, 704),
+    # 'render_size': (90, 160), # SMALL FOR DEBUG
+    'render_size': (180, 320),
+    # 'render_size': (256, 704),  # for mask_render=True training
 
     # Augmentation
     'resize': (-0.06, 0.11),
@@ -181,6 +182,7 @@ test_pipeline = [
          data_config=data_config, 
          sequential=True),
     dict(type='LoadOccGTFromFile'),
+    dict(type='LoadLiDARSegGTFromFile'),
     dict(
         type='LoadAnnotationsBEVDepth',
         bda_aug_conf=bda_aug_conf,
@@ -208,7 +210,7 @@ test_pipeline = [
                 with_label=False),
             dict(type='Collect3D', keys=['points', 'img_inputs',
                                          'intricics', 'pose_spatial',
-                                         'voxel_semantics',
+                                         'voxel_semantics', 'img_semantic',
                                          'render_gt_img', 'render_gt_depth'])
         ])
 ]

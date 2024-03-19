@@ -64,11 +64,12 @@ class NuScenesDatasetOccpancy(NuScenesDataset):
             input_dict['lidarseg'] = self.data_infos[index]['lidarseg']
         return input_dict
 
-    def evaluate(self, occ_results, runner=None, show_dir=None, **eval_kwargs):
+    def evaluate(self, occ_results, runner=None, show_dir=None, 
+                 use_image_mask=True, **eval_kwargs):
         self.occ_eval_metrics = Metric_mIoU(
             num_classes=18,
             use_lidar_mask=False,
-            use_image_mask=True)
+            use_image_mask=use_image_mask)
 
         print('\nStarting Evaluation...')
         for index, occ_pred in enumerate(tqdm(occ_results)):

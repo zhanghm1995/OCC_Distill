@@ -1014,10 +1014,12 @@ class PointToMultiViewDepthForNeRF(object):
 
     def __call__(self, results):
         points_lidar = results['keyframe_points']
-        if 'lidarseg' in results.keys():
+
+        lidarseg = None
+        if 'lidarseg' in results.keys() and \
+            not isinstance(results['lidarseg'], str):
             lidarseg = results['lidarseg']
-        else:
-            lidarseg = None
+        
         imgs, rots, trans, intrins = results['img_inputs'][:4]
         post_rots, post_trans, bda = results['img_inputs'][4:]
         post_rots_noaug, post_trans_noaug = results['post_rots_ori'], results['post_trans_ori']
