@@ -38,6 +38,52 @@ class LoadOccGTFromFile(object):
         results['mask_camera_free'] = mask_camera_free
 
         return results
+
+
+def occ_to_voxel(gt_occ, ratio=1, gt_shape=(200, 200, 16)):
+    """Convert the gt occ in (N, 4) format to (x, y, z)
+
+    Args:
+        gt_occ (_type_): _description_
+        ratio (int, optional): _description_. Defaults to 1.
+        gt_shape (tuple, optional): _description_. Defaults to (200, 200, 16).
+
+    Returns:
+        _type_: _description_
+    """
+    gt = np.zeros([gt_shape[0], gt_shape[1], gt_shape[2]]).astype(np.float32) 
+    coords = gt_occ[:, :3].astype(np.int64) // ratio
+    gt[coords[:, 0], coords[:, 1], coords[:, 2]] = gt_occ[:, 3]
+    
+    return gt
+
+
+@PIPELINES.register_module()
+class LoadSurroundOccOccupancy(object):
+    def __init__(self, use_semantic=True):
+        self.use_semantic = use_semantic
+    
+    def __call__(self, results):
+        occ = np.load(results['occ_gt_path'])
+        occ = occ.astype(np.float32)
+        
+        # class 0 is 'ignore' class
+        if self.use_semantic:
+            occ[..., 3][occ[..., 3] == 0] = 255
+        else:
+            occ = occ[occ[..., 3] > 0]
+            occ[..., 3] = 1
+        
+        results['voxel_semantics'] = occ_to_voxel(occ).astype(np.int64)
+        results['mask_camera'] = np.zeros_like(results['voxel_semantics'])
+        results['mask_lidar'] = np.zeros_like(results['voxel_semantics'])
+        results['mask_camera_free'] = np.zeros_like(results['voxel_semantics'])
+        return results
+
+    def __repr__(self):
+        """str: Return a string that describes the module."""
+        repr_str = self.__class__.__name__
+        return repr_str
     
 
 @PIPELINES.register_module()
@@ -1330,6 +1376,39 @@ class PrepareImageInputs(object):
     def __call__(self, results):
         results['img_inputs'] = self.get_inputs(results)
         return results
+
+
+@PIPELINES.register_module()
+class PrepareRoboDriveImageInputs(PrepareImageInputs):
+    """In RoboDrive dataset, the occupancy is defined in the LiDAR coodinate.
+
+    Args:
+        PrepareImageInputs (_type_): _description_
+    """
+    def get_sensor_transforms(self, cam_info, cam_name):
+        # sensor to lidar
+        sensor2ego_rot = torch.Tensor(
+            cam_info['cams'][cam_name]['sensor2lidar_rotation'])
+        sensor2ego_tran = torch.Tensor(
+            cam_info['cams'][cam_name]['sensor2lidar_translation'])
+        sensor2ego = sensor2ego_rot.new_zeros((4, 4))
+        sensor2ego[3, 3] = 1
+        sensor2ego[:3, :3] = sensor2ego_rot
+        sensor2ego[:3, -1] = sensor2ego_tran
+        
+        # lidar to global
+        lidar2ego_r = Quaternion(cam_info['lidar2ego_rotation']).rotation_matrix
+        lidar2ego = np.eye(4)
+        lidar2ego[:3, :3] = lidar2ego_r
+        lidar2ego[:3, 3] = np.array(cam_info['lidar2ego_translation']).T
+
+        ego2global_r = Quaternion(cam_info['ego2global_rotation']).rotation_matrix
+        ego2global = np.eye(4)
+        ego2global[:3, :3] = ego2global_r
+        ego2global[:3, 3] = np.array(cam_info['ego2global_translation']).T
+
+        lidar2global = torch.Tensor(ego2global @ lidar2ego)
+        return sensor2ego, lidar2global
 
 
 @PIPELINES.register_module()

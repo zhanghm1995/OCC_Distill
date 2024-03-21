@@ -40,6 +40,7 @@ class BEVStereo4DOCC(BEVStereo4D):
                  num_classes=18,
                  use_predicter=True,
                  class_wise=False,
+                 for_robodrive=False,
                  **kwargs):
         super(BEVStereo4DOCC, self).__init__(**kwargs)
         self.out_dim = out_dim
@@ -65,6 +66,10 @@ class BEVStereo4DOCC(BEVStereo4D):
         self.loss_occ = build_loss(loss_occ)
         self.class_wise = class_wise
         self.align_after_view_transfromation = False
+
+        self.for_robodrive = for_robodrive
+        if for_robodrive:
+            assert not use_mask, 'mask is not supported for robodrive'
 
     def loss_single(self,voxel_semantics,mask_camera,preds):
         loss_ = dict()
@@ -149,8 +154,9 @@ class BEVStereo4DOCC(BEVStereo4D):
         if self.use_predicter:
             occ_pred = self.predicter(occ_pred)
         voxel_semantics = kwargs['voxel_semantics']
-        mask_camera = kwargs['mask_camera']
-        assert voxel_semantics.min() >= 0 and voxel_semantics.max() <= 17
+        mask_camera = kwargs['mask_camera'] if self.use_mask else None
+        if not self.for_robodrive:
+            assert voxel_semantics.min() >= 0 and voxel_semantics.max() <= 17
         loss_occ = self.loss_single(voxel_semantics, mask_camera, occ_pred)
         losses.update(loss_occ)
         return losses
