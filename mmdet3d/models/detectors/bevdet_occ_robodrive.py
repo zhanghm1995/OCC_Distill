@@ -23,16 +23,20 @@ from mmdet.core import multi_apply
 from mmdet3d.datasets.evaluation_metrics import evaluation_semantic
 from .. import builder
 from .bevdet_occ import BEVStereo4DOCC
+from ..losses.loss_utils import sem_scal_loss, geo_scal_loss
 
 
 @DETECTORS.register_module()
 class BEVStereo4DOCCRoboDrive(BEVStereo4DOCC):
 
     def __init__(self,
+                 use_surroundocc_loss=False,
                  **kwargs):
         super(BEVStereo4DOCCRoboDrive, self).__init__(**kwargs)
 
         assert not self.use_mask, 'mask is not supported for robodrive'
+
+        self.use_surroundocc_loss = use_surroundocc_loss
 
     def simple_test(self,
                     points,
@@ -81,9 +85,26 @@ class BEVStereo4DOCCRoboDrive(BEVStereo4DOCC):
         occ_pred = self.final_conv(img_feats[0]).permute(0, 4, 3, 2, 1) # bncdhw->bnwhdc
         if self.use_predicter:
             occ_pred = self.predicter(occ_pred)
+        
+        # compute losses
         voxel_semantics = kwargs['voxel_semantics']
-        mask_camera = kwargs['mask_camera'] if self.use_mask else None
-        loss_occ = self.loss_single(voxel_semantics, mask_camera, occ_pred)
+        loss_occ = self.loss_single(voxel_semantics, occ_pred)
         losses.update(loss_occ)
         return losses
+    
+    def loss_single(self, voxel_semantics, preds):
+        loss_ = dict()
+
+        if self.use_surroundocc_loss:
+            preds_tmp = rearrange(preds, 'b h w d c -> b c h w d')
+            loss_['loss_sem_scal'] = sem_scal_loss(preds_tmp, voxel_semantics.long())
+            loss_['loss_geo_scal'] = geo_scal_loss(preds_tmp, voxel_semantics.long())
+
+        voxel_semantics = voxel_semantics.long()
+        voxel_semantics = voxel_semantics.reshape(-1)
+        preds = preds.reshape(-1, self.num_classes)
+        loss_occ = self.loss_occ(preds, voxel_semantics)
+        loss_['loss_occ'] = loss_occ
+
+        return loss_
     

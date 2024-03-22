@@ -260,7 +260,7 @@ def main():
     for corruption in cfg.corruptions:
         # build the dataloader
         cfg.data.test.corruption = corruption
-        cfg.data.test.use_clean_inputs = True
+        # cfg.data.test.use_clean_inputs = True
         dataset = build_dataset(cfg.data.test)
         data_loader = build_dataloader(
             dataset, **test_loader_cfg

@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-import chamfer
+
 
 def voxel_to_vertices(voxel, img_metas, thresh=0.5):
     x = torch.linspace(0, voxel.shape[0] - 1, voxel.shape[0])
@@ -29,6 +29,8 @@ def gt_to_voxel(gt, img_metas):
     return voxel
 
 def eval_3d(verts_pred, verts_trgt, threshold=.5):
+    import chamfer
+    
     d1, d2, idx1, idx2 = chamfer.forward(verts_pred.unsqueeze(0).type(torch.float), verts_trgt.unsqueeze(0).type(torch.float))
     dist1 = torch.sqrt(d1).cpu().numpy()
     dist2 = torch.sqrt(d2).cpu().numpy()
