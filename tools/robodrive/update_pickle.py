@@ -43,12 +43,34 @@ def use_surroundocc_path(origin_pickle_fp,
         pickle.dump(result_dict, f)
 
 
+def update_robodrive_test_infos(origin_pickle_fp,
+                                robodrive_pickle_fp):
+    metadata1, data_infos1 = load_pickle(origin_pickle_fp)
+    metadata2, data_infos2 = load_pickle(robodrive_pickle_fp)
+
+    for i, data_info in tqdm(enumerate(data_infos1)):
+        data_info['occ_path'] = data_infos2[i]['occ_path']
+        data_info['token'] = data_infos2[i]['token']
+        data_info['prev'] = data_infos2[i]['prev']
+        data_info['next'] = data_infos2[i]['next']
+        data_info['scene_token'] = data_infos2[i]['scene_token']
+    
+    result_dict = dict()
+    result_dict['metadata'] = metadata1
+    result_dict['infos'] = data_infos1
+
+    pickle_file = origin_pickle_fp.replace('.pkl', '_robodrive.pkl')
+    print(f"Save to {pickle_file}")
+    with open(pickle_file, 'wb') as f:
+        pickle.dump(result_dict, f)
+
+
 if __name__ == "__main__":
-    pickle1 = "data/nuscenes/bevdetv3-lidarseg-nuscenes_infos_train.pkl"
-    pickle2 = "/mnt/data2/zhanghm/RoboDrive/BEVFormer_RoboDrive/data/robodrive_nuscenes_infos_train.pkl"
-    use_surroundocc_path(pickle1, pickle2)
+    # pickle1 = "data/nuscenes/bevdetv3-lidarseg-nuscenes_infos_train.pkl"
+    # pickle2 = "/mnt/data2/zhanghm/RoboDrive/BEVFormer_RoboDrive/data/robodrive_nuscenes_infos_train.pkl"
+    # use_surroundocc_path(pickle1, pickle2)
 
     # validation
     pickle1 = "data/nuscenes/bevdetv3-lidarseg-nuscenes_infos_val.pkl"
-    pickle2 = "/mnt/data2/zhanghm/RoboDrive/BEVFormer_RoboDrive/data/robodrive_nuscenes_infos_val.pkl"
-    use_surroundocc_path(pickle1, pickle2)
+    pickle2 = "/mnt/data2/zhanghm/RoboDrive/BEVFormer_RoboDrive/data/robodrive_infos_temporal_test.pkl"
+    update_robodrive_test_infos(pickle1, pickle2)

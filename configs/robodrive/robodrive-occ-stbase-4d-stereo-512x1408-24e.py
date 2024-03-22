@@ -2,14 +2,12 @@
 Copyright (c) 2024 by Haiming Zhang. All Rights Reserved.
 
 Author: Haiming Zhang
-Date: 2024-03-21 15:50:02
+Date: 2024-03-22 11:50:28
 Email: haimingzhang@link.cuhk.edu.cn
 Description: 
 '''
 
-
 _base_ = ['../_base_/datasets/nus-3d.py', '../_base_/default_runtime.py']
-# Global
 # For nuScenes we usually do 10-class detection
 class_names = [
     'car', 'truck', 'construction_vehicle', 'bus', 'trailer', 'barrier',
@@ -23,7 +21,7 @@ data_config = {
     ],
     'Ncams':
     6,
-    'input_size': (256, 704),
+    'input_size': (512, 1408),
     'src_size': (900, 1600),
 
     # Augmentation
@@ -52,27 +50,41 @@ model = dict(
     align_after_view_transfromation=False,
     num_adj=len(range(*multi_adj_frame_id_cfg)),
     img_backbone=dict(
-        type='ResNet',
-        depth=50,
-        num_stages=4,
-        out_indices=(0, 2, 3),
-        frozen_stages=-1,
-        norm_cfg=dict(type='BN', requires_grad=True),
-        norm_eval=False,
-        with_cp=True,
-        style='pytorch'),
+        type='SwinTransformer',
+        pretrain_img_size=224,
+        patch_size=4,
+        window_size=12,
+        mlp_ratio=4,
+        embed_dims=128,
+        depths=[2, 2, 18, 2],
+        num_heads=[4, 8, 16, 32],
+        strides=(4, 2, 2, 2),
+        out_indices=(2, 3),
+        qkv_bias=True,
+        qk_scale=None,
+        patch_norm=True,
+        drop_rate=0.,
+        attn_drop_rate=0.,
+        drop_path_rate=0.1,
+        use_abs_pos_embed=False,
+        return_stereo_feat=True,
+        act_cfg=dict(type='GELU'),
+        norm_cfg=dict(type='LN', requires_grad=True),
+        pretrain_style='official',
+        output_missing_index_as_none=False),
     img_neck=dict(
-        type='CustomFPN',
-        in_channels=[1024, 2048],
-        out_channels=256,
-        num_outs=1,
-        start_level=0,
-        out_ids=[0]),
+        type='FPN_LSS',
+        in_channels=512 + 1024,
+        out_channels=512,
+        # with_cp=False,
+        extra_upsample=None,
+        input_feature_index=(0, 1),
+        scale_factor=2),
     img_view_transformer=dict(
         type='LSSViewTransformerBEVStereo',
         grid_config=grid_config,
         input_size=data_config['input_size'],
-        in_channels=256,
+        in_channels=512,
         out_channels=numC_Trans,
         sid=False,
         collapse_z=False,
@@ -223,15 +235,20 @@ for key in ['val', 'test']:
     data[key].update(robodrive_config)
 
 # Optimizer
-optimizer = dict(type='AdamW', lr=1e-4, weight_decay=1e-2)
+optimizer = dict(type='AdamW', lr=2e-4, weight_decay=1e-2)
 optimizer_config = dict(grad_clip=dict(max_norm=5, norm_type=2))
-
+# lr_config = dict(
+#     policy='step',
+#     warmup='linear',
+#     warmup_iters=200,
+#     warmup_ratio=0.001,
+#     step=[100,])
 lr_config = dict(
-    policy='step',
+    policy='CosineAnnealing',
     warmup='linear',
-    warmup_iters=200,
-    warmup_ratio=0.001,
-    step=[100,])
+    warmup_iters=500,
+    warmup_ratio=1.0 / 3,
+    min_lr_ratio=1e-3)
 runner = dict(type='EpochBasedRunner', max_epochs=24)
 
 custom_hooks = [
@@ -240,11 +257,13 @@ custom_hooks = [
         init_updates=10560,
         priority='NORMAL',
     ),
+    dict(
+        type='SyncbnControlHook',
+        syncbn_start_epoch=0,
+    ),
 ]
 
-load_from="ckpts/bevdet-r50-4d-stereo-cbgs.pth"
-
-
+load_from="ckpts/bevdet-stbase-4d-stereo-512x1408-cbgs.pth"
 corruptions = [
         'brightness', 'dark', 'fog', 'frost', 'snow', 'contrast',
         'defocus_blur', 'glass_blur', 'motion_blur', 'zoom_blur', 'elastic_transform', 'color_quant',
