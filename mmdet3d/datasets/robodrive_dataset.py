@@ -181,7 +181,7 @@ class RoboDriveDataset(NuScenesDatasetOccpancy):
             
             for i in range(class_num):
                 results_dict[class_names[i]] = mean_ious[i]
-            results_dict['mIoU'] = np.mean(np.array(mean_ious)[1:])
+            results_dict['mIoU'] = np.nanmean(np.array(mean_ious)[1:])
 
 
         else:
