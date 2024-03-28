@@ -141,7 +141,8 @@ class BEVFusionStereo4DOCCRoboDrive(BEVStereo4DOCCRoboDrive):
     """Fuse the lidar and camera images for occupancy prediction.
 
     Args:
-        BEVStereo4DOCC (_type_): _description_
+        fuse_3d_bev (bool): whether fuse the camera and lidar features in 3D
+            space or BEV space.
     """
 
     def __init__(self,
@@ -153,6 +154,8 @@ class BEVFusionStereo4DOCCRoboDrive(BEVStereo4DOCCRoboDrive):
         
         self.fuse_3d_bev = fuse_3d_bev
         self.se = se
+        self.lic = lic
+        self.fuse_3d_bev = fuse_3d_bev
         
         if fuse_3d_bev:
             if se:
@@ -222,23 +225,6 @@ class BEVFusionStereo4DOCCRoboDrive(BEVStereo4DOCCRoboDrive):
         ## apply the lidar camera fusion
         fusion_feats = self.apply_lc_fusion(img_feats[0], pts_feats)
         return (fusion_feats, pts_feats, depth)
-
-    def simple_test(self,
-                    points,
-                    img_metas,
-                    img=None,
-                    rescale=False,
-                    **kwargs):
-        """Test function without augmentaiton."""
-        img_feats, _, _ = self.extract_feat(
-            points, img=img, img_metas=img_metas, **kwargs)
-        occ_pred = self.final_conv(img_feats[0]).permute(0, 4, 3, 2, 1)
-        if self.use_predicter:
-            occ_pred = self.predicter(occ_pred)
-        occ_score=occ_pred.softmax(-1)
-        occ_res=occ_score.argmax(-1)
-        occ_res = occ_res.squeeze(dim=0).cpu().numpy().astype(np.uint8)
-        return [occ_res]
     
     def forward_train(self,
                       points=None,
@@ -264,39 +250,85 @@ class BEVFusionStereo4DOCCRoboDrive(BEVStereo4DOCCRoboDrive):
         losses.update(loss_occ)
         return losses
     
-    def forward_test(self,
-                     points=None,
-                     img_metas=None,
-                     img_inputs=None,
-                     **kwargs):
-        """
-        Args:
-            points (list[torch.Tensor]): the outer list indicates test-time
-                augmentations and inner torch.Tensor should have a shape NxC,
-                which contains all points in the batch.
-            img_metas (list[list[dict]]): the outer list indicates test-time
-                augs (multiscale, flip, etc.) and the inner list indicates
-                images in a batch
-            img (list[torch.Tensor], optional): the outer
-                list indicates test-time augmentations and inner
-                torch.Tensor should have a shape NxCxHxW, which contains
-                all images in the batch. Defaults to None.
-        """
-        for var, name in [(img_inputs, 'img_inputs'),
-                          (img_metas, 'img_metas')]:
-            if not isinstance(var, list):
-                raise TypeError('{} must be a list, but got {}'.format(
-                    name, type(var)))
 
-        num_augs = len(img_inputs)
-        if num_augs != len(img_metas):
-            raise ValueError(
-                'num of augmentations ({}) != num of image meta ({})'.format(
-                    len(points), len(img_metas)))
+@DETECTORS.register_module()
+class BEVFusionOCCLidarSuperviseRoboDrive(BEVFusionStereo4DOCCRoboDrive):
+    """Add the lidar branch supervision for the BEV fusion framework.
 
-        if num_augs == 1:
-            img_inputs = [img_inputs] if img_inputs is None else img_inputs
-            return self.simple_test(points[0], img_metas[0], 
-                                    img_inputs[0], **kwargs)
-        else:
-            return self.aug_test(points, img_metas, img_inputs, **kwargs)
+    Args:
+        BEVStereo4DOCC (_type_): _description_
+    """
+
+    def __init__(self,
+                 **kwargs):
+        super().__init__(**kwargs)
+        
+        out_channels = 32
+        lidar_channels = self.lic
+        num_classes = self.num_classes
+        self.lidar_conv = ConvModule(
+            lidar_channels,
+            out_channels,
+            kernel_size=3,
+            stride=1,
+            padding=1,
+            bias=True,
+            conv_cfg=dict(type='Conv3d'))
+        self.lidar_predictor = nn.Sequential(
+            nn.Linear(out_channels, out_channels*2),
+            nn.Softplus(),
+            nn.Linear(out_channels*2, num_classes),
+        )
+    
+    def loss_single(self, voxel_semantics, preds, prefix='cam'):
+        loss_ = dict()
+
+        if self.use_surroundocc_loss:
+            preds_tmp = rearrange(preds, 'b h w d c -> b c h w d')
+            loss_[f'{prefix}_loss_sem_scal'] = sem_scal_loss(preds_tmp, voxel_semantics.long())
+            loss_[f'{prefix}_loss_geo_scal'] = geo_scal_loss(preds_tmp, voxel_semantics.long())
+
+        voxel_semantics = voxel_semantics.long()
+        voxel_semantics = voxel_semantics.reshape(-1)
+        preds = preds.reshape(-1, self.num_classes)
+        loss_occ = self.loss_occ(preds, voxel_semantics)
+        loss_[f'{prefix}_loss_occ'] = loss_occ
+
+        if self.use_lovasz_loss:
+            loss_lovasz = self.loss_lovasz(F.softmax(preds, dim=1), 
+                                        voxel_semantics)
+            
+            loss_[f'{prefix}_loss_lovasz'] = loss_lovasz
+
+        return loss_
+
+    def forward_train(self,
+                      points=None,
+                      img_metas=None,
+                      img_inputs=None,
+                      **kwargs):
+        img_feats, pts_feats, depth = self.extract_feat(
+            points, img=img_inputs, img_metas=img_metas, **kwargs)
+
+        ## lidar branch with supervision
+        lidar_feats = self.lidar_conv(pts_feats).permute(0, 4, 3, 2, 1)
+        lidar_pred = self.lidar_predictor(lidar_feats)
+
+        gt_depth = kwargs['gt_depth']
+        losses = dict()
+        loss_depth = self.img_view_transformer.get_depth_loss(gt_depth, depth)
+        losses['loss_depth'] = loss_depth
+
+        occ_pred = self.final_conv(img_feats[0]).permute(0, 4, 3, 2, 1) # bncdhw->bnwhdc
+        if self.use_predicter:
+            occ_pred = self.predicter(occ_pred)
+        voxel_semantics = kwargs['voxel_semantics']
+
+        loss_occ = self.loss_single(voxel_semantics, occ_pred, prefix='cam')
+        losses.update(loss_occ)
+
+        ## add the lidar branch supervision
+        loss_occ_lidar = self.loss_single(voxel_semantics, lidar_pred, prefix='lidar')
+        losses.update(loss_occ_lidar)
+
+        return losses

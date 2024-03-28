@@ -9,6 +9,7 @@ from .. import builder
 from .centerpoint import CenterPoint
 from mmdet.models.backbones.resnet import ResNet
 from mmdet3d.models.backbones.internimage import InternImage
+from mmdet3d.utils.grid_mask import GridMask
 
 
 @DETECTORS.register_module()
@@ -579,11 +580,15 @@ class BEVDepth4D(BEVDet4D):
 
 @DETECTORS.register_module()
 class BEVStereo4D(BEVDepth4D):
-    def __init__(self, **kwargs):
+    def __init__(self, use_grid_mask=False, **kwargs):
         super(BEVStereo4D, self).__init__(**kwargs)
         self.extra_ref_frames = 1
         self.temporal_frame = self.num_frame
         self.num_frame += self.extra_ref_frames
+
+        self.use_grid_mask = use_grid_mask
+        self.grid_mask = GridMask(
+            True, True, rotate=1, offset=False, ratio=0.5, mode=1, prob=0.7)
 
     def extract_stereo_ref_feat(self, x):
         B, N, C, imH, imW = x.shape
@@ -674,6 +679,12 @@ class BEVStereo4D(BEVDepth4D):
                 mlp_input = self.img_view_transformer.get_mlp_input(
                     sensor2keyegos[0], ego2globals[0], intrin,
                     post_rot, post_tran, bda)
+                if self.use_grid_mask:
+                    B, N, C, H, W = img.shape
+                    img = img.view(-1, C, H, W).contiguous()
+                    img = self.grid_mask(img)
+                    img = img.view(B, N, C, H, W).contiguous()
+                    
                 inputs_curr = (img, sensor2keyego, ego2global, intrin,
                                post_rot, post_tran, bda, mlp_input,
                                feat_prev_iv, curr2adjsensor[fid],

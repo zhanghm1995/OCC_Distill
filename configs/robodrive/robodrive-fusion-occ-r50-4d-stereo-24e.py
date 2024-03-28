@@ -51,6 +51,8 @@ multi_adj_frame_id_cfg = (1, 1+1, 1)
 
 model = dict(
     type='BEVFusionStereo4DOCCRoboDrive',
+    use_surroundocc_loss=True,
+    use_lovasz_loss=True,
     num_classes=17,
     align_after_view_transfromation=False,
     num_adj=len(range(*multi_adj_frame_id_cfg)),
@@ -210,7 +212,8 @@ test_pipeline = [
                 type='DefaultFormatBundle3D',
                 class_names=class_names,
                 with_label=False),
-            dict(type='Collect3D', keys=['points', 'img_inputs'])
+            dict(type='Collect3D', keys=['points', 'img_inputs',
+                                         'voxel_semantics'])
         ])
 ]
 
