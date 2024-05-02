@@ -53,6 +53,7 @@ model = dict(
     num_adj=len(range(*multi_adj_frame_id_cfg)),
     img_backbone=dict(
         type='ResNet',
+        pretrained='torchvision://resnet50',
         depth=50,
         num_stages=4,
         out_indices=(0, 2, 3),
@@ -242,7 +243,7 @@ custom_hooks = [
     ),
 ]
 
-load_from="ckpts/bevdet-r50-4d-stereo-cbgs.pth"
+# load_from="ckpts/bevdet-r50-4d-stereo-cbgs.pth"
 
 
 corruptions = [
