@@ -1301,7 +1301,7 @@ class PrepareImageInputs(object):
         canvas = []
         for cam_name in cam_names:
             cam_data = results['curr']['cams'][cam_name]
-            filename = cam_data['data_path']
+            filename = 'data/openscene-v1.1/sensor_blobs/mini/' + cam_data['data_path']
             img = Image.open(filename)
             post_rot = torch.eye(2)
             post_tran = torch.zeros(2)

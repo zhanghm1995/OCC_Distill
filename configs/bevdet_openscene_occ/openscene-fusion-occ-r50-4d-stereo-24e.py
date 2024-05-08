@@ -9,19 +9,17 @@ Description:
 
 _base_ = ['../_base_/datasets/nus-3d.py', '../_base_/default_runtime.py']
 # Global
-# For nuScenes we usually do 10-class detection
+# For openscene we usually do 10-class detection
 class_names = [
-    'car', 'truck', 'construction_vehicle', 'bus', 'trailer', 'barrier',
-    'motorcycle', 'bicycle', 'pedestrian', 'traffic_cone'
+    'vehicle', 'place_holder1', 'place_holder2', 'place_holder3', 'czone_sign', 'bicycle', 'generic_object', 'pedestrian', 'traffic_cone', 'barrier'
 ]
 
-data_config = {
+data_config = {    #?
     'cams': [
-        'CAM_FRONT_LEFT', 'CAM_FRONT', 'CAM_FRONT_RIGHT', 'CAM_BACK_LEFT',
-        'CAM_BACK', 'CAM_BACK_RIGHT'
+        'CAM_F0', 'CAM_L0', 'CAM_R0', 'CAM_L1', 'CAM_R1', 'CAM_L2', 'CAM_R2', 'CAM_B0'
     ],
     'Ncams':
-    6,
+    8,
     'input_size': (256, 704),
     'src_size': (900, 1600),
 
@@ -34,19 +32,19 @@ data_config = {
 }
 
 # Model
-grid_config = {
+grid_config = {     #?
     'x': [-40, 40, 0.4],
     'y': [-40, 40, 0.4],
     'z': [-1, 5.4, 0.4],
     'depth': [1.0, 45.0, 0.5],
 }
 
-point_cloud_range = [-40, -40, -1, 40, 40, 5.4]
-voxel_size = [0.2, 0.2, 6.4]
+point_cloud_range = [-50.0, -50.0, -4.0, 50.0, 50.0, 4.0]
+voxel_size = [0.2, 0.2, 8]
 
-numC_Trans = 32
+numC_Trans = 32  #?
 
-multi_adj_frame_id_cfg = (1, 1+1, 1)
+multi_adj_frame_id_cfg = (1, 1+1, 1)  #?
 
 model = dict(
     type='BEVFusionStereo4DOCC',
@@ -143,8 +141,11 @@ model = dict(
 )
 
 # Data
-dataset_type = 'CustomNuPlanDataset'
-data_root = 'data/nuscenes/'
+dataset_type = 'CustomNuPlanDataset2'
+data_split = 'mini'
+data_root = f'data/openscene-v1.1/sensor_blobs/{data_split}'
+train_ann_pickle_root = f'data/openscene-v1.1/openscene_{data_split}_train.pkl'
+val_ann_pickle_root = f'data/openscene-v1.1/openscene_{data_split}_val.pkl'
 file_client_args = dict(backend='disk')
 
 bda_aug_conf = dict(
@@ -154,11 +155,12 @@ bda_aug_conf = dict(
     flip_dy_ratio=0.5)
 
 train_pipeline = [
-    dict(
-        type='PrepareImageInputs',
-        is_train=True,
-        data_config=data_config,
-        sequential=True),
+    # dict(
+    #     type='PrepareImageInputs',
+    #     is_train=True,
+    #     data_config=data_config,
+    #     sequential=True),
+    dict(type='LoadMultiViewImageFromFiles', to_float32=True),
     dict(type='LoadOccGTFromFile'),
     dict(
         type='LoadAnnotationsBEVDepth',
@@ -229,14 +231,14 @@ share_data_config = dict(
 
 test_data_config = dict(
     pipeline=test_pipeline,
-    ann_file=data_root + 'bevdetv2-nuscenes_infos_val.pkl')
+    ann_file=val_ann_pickle_root)
 
 data = dict(
     samples_per_gpu=4,
     workers_per_gpu=16,
     train=dict(
         data_root=data_root,
-        ann_file=data_root + 'bevdetv2-nuscenes_infos_train.pkl',
+        ann_file=train_ann_pickle_root,
         pipeline=train_pipeline,
         classes=class_names,
         test_mode=False,
@@ -278,5 +280,5 @@ custom_hooks = [
     ),
 ]
 
-load_from="bevdet-r50-4d-stereo-cbgs.pth"
+# load_from="bevdet-r50-4d-stereo-cbgs.pth"
 # fp16 = dict(loss_scale='dynamic')
