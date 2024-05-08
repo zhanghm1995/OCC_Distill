@@ -9,21 +9,19 @@ Description:
 
 _base_ = ['../_base_/datasets/nus-3d.py', '../_base_/default_runtime.py']
 # Global
-# For nuScenes we usually do 10-class detection
+# For openscene we usually do 10-class detection
 class_names = [
-    'car', 'truck', 'construction_vehicle', 'bus', 'trailer', 'barrier',
-    'motorcycle', 'bicycle', 'pedestrian', 'traffic_cone'
+    'vehicle', 'place_holder1', 'place_holder2', 'place_holder3', 'czone_sign', 'bicycle', 'generic_object', 'pedestrian', 'traffic_cone', 'barrier'
 ]
 
 data_config = {
     'cams': [
-        'CAM_FRONT_LEFT', 'CAM_FRONT', 'CAM_FRONT_RIGHT', 'CAM_BACK_LEFT',
-        'CAM_BACK', 'CAM_BACK_RIGHT'
+        'CAM_F0', 'CAM_L0', 'CAM_R0', 'CAM_L1', 'CAM_R1', 'CAM_L2', 'CAM_R2', 'CAM_B0'
     ],
     'Ncams':
-    6,
+    8,
     'input_size': (256, 704),
-    'src_size': (900, 1600),
+    'src_size': (1080, 1920),
 
     # Augmentation
     'resize': (-0.06, 0.11),
@@ -35,22 +33,24 @@ data_config = {
 
 # Model
 grid_config = {
-    'x': [-40, 40, 0.4],
-    'y': [-40, 40, 0.4],
-    'z': [-1, 5.4, 0.4],
-    'depth': [1.0, 45.0, 0.5],
+    'x': [-50, 50, 0.5],
+    'y': [-50, 50, 0.5],
+    'z': [-4.0, 4.0, 0.5],
+    'depth': [1.0, 55.0, 0.5],
 }
 
-point_cloud_range = [-40, -40, -1, 40, 40, 5.4]
-voxel_size = [0.2, 0.2, 6.4]
+point_cloud_range = [-50.0, -50.0, -4.0, 50.0, 50.0, 4.0]
+voxel_size = [0.25, 0.25, 8]
 
-numC_Trans = 32
+numC_Trans = 32  #?
 
-multi_adj_frame_id_cfg = (1, 1+1, 1)
+multi_adj_frame_id_cfg = (1, 1+1, 1)  #?
 
 model = dict(
-    type='BEVFusionStereo4DOCC',
+    type='BEVFusionStereo4DOCCOpenScene',
     align_after_view_transfromation=False,
+    num_classes=12, # including free category
+    use_mask=False,
     num_adj=len(range(*multi_adj_frame_id_cfg)),
     img_backbone=dict(
         type='ResNet',
@@ -139,12 +139,14 @@ model = dict(
         type='CrossEntropyLoss',
         use_sigmoid=False,
         loss_weight=1.0),
-    use_mask=True,
 )
 
 # Data
 dataset_type = 'CustomNuPlanDataset'
-data_root = 'data/nuscenes/'
+data_split = 'mini'
+data_root = f'data/openscene-v1.1/sensor_blobs/{data_split}'
+train_ann_pickle_root = f'data/openscene-v1.1/openscene_{data_split}_train_v2.pkl'
+val_ann_pickle_root = f'data/openscene-v1.1/openscene_{data_split}_val_v2.pkl'
 file_client_args = dict(backend='disk')
 
 bda_aug_conf = dict(
@@ -155,24 +157,30 @@ bda_aug_conf = dict(
 
 train_pipeline = [
     dict(
-        type='PrepareImageInputs',
+        type='PrepareOpenSceneImageInputs',
         is_train=True,
         data_config=data_config,
         sequential=True),
-    dict(type='LoadOccGTFromFile'),
+    dict(type='LoadOpenSceneOccupancy'),
     dict(
-        type='LoadAnnotationsBEVDepth',
+        type='LoadOpenSceneAnnotationsBEVDepth',
         bda_aug_conf=bda_aug_conf,
         classes=class_names,
         is_train=True),
+    dict(type='LoadNuPlanPointsFromFile',
+         coord_type='LIDAR'),
     dict(
-        type='LoadPointsFromFile',
-        coord_type='LIDAR',
-        load_dim=5,
-        use_dim=[0,1,2,4],
-        file_client_args=file_client_args),
-    dict(type='PointToMultiViewDepth', downsample=1, grid_config=grid_config),
-    dict(type='PointToEgo'),
+        type='LoadNuPlanPointsFromMultiSweeps',
+        sweeps_num=0,
+        use_dim=[0, 1, 2, 3],
+        file_client_args=file_client_args,
+        pad_empty_sweeps=True,
+        remove_close=True,
+        ego_mask=(-0.8, -1.5, 0.8, 2.5),
+        hard_sweeps_timestamp=0,
+        random_select=False,
+    ),
+    dict(type='OpenScenePointToMultiViewDepth', downsample=1, grid_config=grid_config),
     dict(type='PointsRangeFilter', point_cloud_range=point_cloud_range),
     dict(type='PointsConditionalFlip'),
     dict(type='DefaultFormatBundle3D', class_names=class_names),
@@ -194,7 +202,8 @@ test_pipeline = [
         load_dim=5,
         use_dim=[0,1,2,4],
         file_client_args=file_client_args),
-    dict(type='PointToEgo'),
+    dict(type='LoadNuPlanPointsFromFile',
+         coord_type='LIDAR'),
     dict(type='PointsConditionalFlip'),
     dict(
         type='MultiScaleFlipAug3D',
@@ -229,14 +238,14 @@ share_data_config = dict(
 
 test_data_config = dict(
     pipeline=test_pipeline,
-    ann_file=data_root + 'bevdetv2-nuscenes_infos_val.pkl')
+    ann_file=val_ann_pickle_root)
 
 data = dict(
-    samples_per_gpu=4,
-    workers_per_gpu=16,
+    samples_per_gpu=2,
+    workers_per_gpu=4,
     train=dict(
         data_root=data_root,
-        ann_file=data_root + 'bevdetv2-nuscenes_infos_train.pkl',
+        ann_file=train_ann_pickle_root,
         pipeline=train_pipeline,
         classes=class_names,
         test_mode=False,
@@ -261,13 +270,6 @@ lr_config = dict(
     warmup_iters=200,
     warmup_ratio=0.001,
     step=[100,])
-# ## zhm: we change it to cosine annealing
-# lr_config = dict(
-#     policy='CosineAnnealing',
-#     warmup='linear',
-#     warmup_iters=500,
-#     warmup_ratio=1.0 / 3,
-#     min_lr_ratio=1e-3)
 runner = dict(type='EpochBasedRunner', max_epochs=24)
 
 custom_hooks = [
@@ -278,5 +280,5 @@ custom_hooks = [
     ),
 ]
 
-load_from="bevdet-r50-4d-stereo-cbgs.pth"
+# load_from="bevdet-r50-4d-stereo-cbgs.pth"
 # fp16 = dict(loss_scale='dynamic')

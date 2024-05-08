@@ -1,195 +1,212 @@
-'''
-Copyright (c) 2024 by Haiming Zhang. All Rights Reserved.
+# Copyright (c) OpenMMLab. All rights reserved.
+import tempfile
+from os import path as osp
 
-Author: Haiming Zhang
-Date: 2024-05-06 14:22:42
-Email: haimingzhang@link.cuhk.edu.cn
-Description: Load the nuplan dataset. Adapted from OpenScene repo.
-'''
-import os
-import os.path as osp
-import numpy as np
-import pickle
-import torch
-
-
-import copy
-import os
-from pickle import TRUE
-import numpy as np
-from mmdet.datasets import DATASETS
-from mmdet3d.datasets import NuScenesDataset
 import mmcv
-from os import path as osp, stat
-from mmdet.datasets import DATASETS
-import torch
 import numpy as np
-from nuscenes.eval.common.utils import quaternion_yaw, Quaternion
-from mmcv.parallel import DataContainer as DC
-import random
-from torch.nn import functional as F
-from tqdm import tqdm
-import cv2
-import shutil
+import pyquaternion
+from nuscenes.utils.data_classes import Box as NuScenesBox
+
+from ..core import show_result
+from ..core.bbox import Box3DMode, Coord3DMode, LiDARInstance3DBoxes
+from .builder import DATASETS
+from .custom_3d import Custom3DDataset
+from .pipelines import Compose
 
 
 @DATASETS.register_module()
-class CustomNuPlanDataset(NuScenesDataset):
-    r"""nuPlan Dataset.
+class CustomNuPlanDataset(Custom3DDataset):
+    r"""NuScenes Dataset.
 
-    This datset only add camera intrinsics and extrinsics to the results.
+    This class serves as the API for experiments on the NuScenes Dataset.
+
+    Please refer to `NuScenes Dataset <https://www.nuscenes.org/download>`_
+    for data downloading.
+
+    Args:
+        ann_file (str): Path of annotation file.
+        pipeline (list[dict], optional): Pipeline used for data processing.
+            Defaults to None.
+        data_root (str): Path of dataset root.
+        classes (tuple[str], optional): Classes used in the dataset.
+            Defaults to None.
+        load_interval (int, optional): Interval of loading the dataset. It is
+            used to uniformly sample the dataset. Defaults to 1.
+        with_velocity (bool, optional): Whether include velocity prediction
+            into the experiments. Defaults to True.
+        modality (dict, optional): Modality to specify the sensor data used
+            as input. Defaults to None.
+        box_type_3d (str, optional): Type of 3D box of this dataset.
+            Based on the `box_type_3d`, the dataset will encapsulate the box
+            to its original format then converted them to `box_type_3d`.
+            Defaults to 'LiDAR' in this dataset. Available options includes.
+            - 'LiDAR': Box in LiDAR coordinates.
+            - 'Depth': Box in depth coordinates, usually for indoor dataset.
+            - 'Camera': Box in camera coordinates.
+        filter_empty_gt (bool, optional): Whether to filter empty GT.
+            Defaults to True.
+        test_mode (bool, optional): Whether the dataset is in test mode.
+            Defaults to False.
+        eval_version (bool, optional): Configuration version of evaluation.
+            Defaults to  'detection_cvpr_2019'.
+        use_valid_flag (bool, optional): Whether to use `use_valid_flag` key
+            in the info file as mask to filter gt_boxes and gt_names.
+            Defaults to False.
+        img_info_prototype (str, optional): Type of img information.
+            Based on 'img_info_prototype', the dataset will prepare the image
+            data info in the type of 'mmcv' for official image infos,
+            'bevdet' for BEVDet, and 'bevdet4d' for BEVDet4D.
+            Defaults to 'mmcv'.
+        multi_adj_frame_id_cfg (tuple[int]): Define the selected index of
+            reference adjcacent frames.
+        ego_cam (str): Specify the ego coordinate relative to a specified
+            camera by its name defined in NuScenes.
+            Defaults to None, which use the mean of all cameras.
     """
+    NameMapping = {
+        'movable_object.barrier': 'barrier',
+        'vehicle.bicycle': 'bicycle',
+        'vehicle.bus.bendy': 'bus',
+        'vehicle.bus.rigid': 'bus',
+        'vehicle.car': 'car',
+        'vehicle.construction': 'construction_vehicle',
+        'vehicle.motorcycle': 'motorcycle',
+        'human.pedestrian.adult': 'pedestrian',
+        'human.pedestrian.child': 'pedestrian',
+        'human.pedestrian.construction_worker': 'pedestrian',
+        'human.pedestrian.police_officer': 'pedestrian',
+        'movable_object.trafficcone': 'traffic_cone',
+        'vehicle.trailer': 'trailer',
+        'vehicle.truck': 'truck'
+    }
+    DefaultAttribute = {
+        'car': 'vehicle.parked',
+        'pedestrian': 'pedestrian.moving',
+        'trailer': 'vehicle.parked',
+        'truck': 'vehicle.parked',
+        'bus': 'vehicle.moving',
+        'motorcycle': 'cycle.without_rider',
+        'construction_vehicle': 'vehicle.parked',
+        'bicycle': 'cycle.without_rider',
+        'barrier': '',
+        'traffic_cone': '',
+    }
+    AttrMapping = {
+        'cycle.with_rider': 0,
+        'cycle.without_rider': 1,
+        'pedestrian.moving': 2,
+        'pedestrian.standing': 3,
+        'pedestrian.sitting_lying_down': 4,
+        'vehicle.moving': 5,
+        'vehicle.parked': 6,
+        'vehicle.stopped': 7,
+    }
+    AttrMapping_rev = [
+        'cycle.with_rider',
+        'cycle.without_rider',
+        'pedestrian.moving',
+        'pedestrian.standing',
+        'pedestrian.sitting_lying_down',
+        'vehicle.moving',
+        'vehicle.parked',
+        'vehicle.stopped',
+    ]
+    # https://github.com/nutonomy/nuscenes-devkit/blob/57889ff20678577025326cfc24e57424a829be0a/python-sdk/nuscenes/eval/detection/evaluate.py#L222 # noqa
+    ErrNameMapping = {
+        'trans_err': 'mATE',
+        'scale_err': 'mASE',
+        'orient_err': 'mAOE',
+        'vel_err': 'mAVE',
+        'attr_err': 'mAAE'
+    }
 
-    def __init__(self, queue_length=4, bev_size=(200, 200), overlap_test=False, 
-                 accumulate_lidar_path=None, load_occ_post=False,
-                 load_occ_lidarseg=False, load_occ_invalid=False,
-                 occ_type='normal',
-                 use_occ_gts=True,
-                 train_with_partial_data=False,
-                 split_divisor=1,
-                 *args, **kwargs):
-        if accumulate_lidar_path is not None:
-            self.accumulate_infos = mmcv.load(accumulate_lidar_path)
+    # nuplan classes
+    CLASSES = ('vehicle', 'bicycle', 'pedestrian',
+               'traffic_cone', 'barrier', 'czone_sign', 'generic_object') 
+
+    def __init__(self,
+                 ann_file,
+                 pipeline=None,
+                 data_root=None,
+                 classes=None,
+                 load_interval=1,
+                 with_velocity=True,
+                 modality=None,
+                 box_type_3d='LiDAR',
+                 filter_empty_gt=True,
+                 test_mode=False,
+                 eval_version='detection_cvpr_2019',
+                 use_valid_flag=False,
+                 img_info_prototype='mmcv',
+                 multi_adj_frame_id_cfg=None,
+                 ego_cam='CAM_FRONT',
+                 stereo=False):
+        self.load_interval = load_interval
+        self.use_valid_flag = use_valid_flag
+        super().__init__(
+            data_root=data_root,
+            ann_file=ann_file,
+            pipeline=pipeline,
+            classes=classes,
+            modality=modality,
+            box_type_3d=box_type_3d,
+            filter_empty_gt=filter_empty_gt,
+            test_mode=test_mode)
+
+        self.with_velocity = with_velocity
+        self.eval_version = eval_version
+        from nuscenes.eval.detection.config import config_factory
+        self.eval_detection_configs = config_factory(self.eval_version)
+        if self.modality is None:
+            self.modality = dict(
+                use_camera=False,
+                use_lidar=True,
+                use_radar=False,
+                use_map=False,
+                use_external=False,
+            )
+
+        self.img_info_prototype = img_info_prototype
+        self.multi_adj_frame_id_cfg = multi_adj_frame_id_cfg
+        self.ego_cam = ego_cam
+        self.stereo = stereo
+
+    def get_cat_ids(self, idx):
+        """Get category distribution of single scene.
+
+        Args:
+            idx (int): Index of the data_info.
+
+        Returns:
+            dict[list]: for each category, if the current scene
+                contains such boxes, store a list containing idx,
+                otherwise, store empty list.
+        """
+        info = self.data_infos[idx]
+        if self.use_valid_flag:
+            mask = info['valid_flag']
+            gt_names = set(info['gt_names'][mask])
         else:
-            self.accumulate_infos = None
-        self.load_occ_post = load_occ_post
-        self.load_occ_lidarseg = load_occ_lidarseg
-        self.load_occ_invalid = load_occ_invalid
-        self.use_occ_gts = use_occ_gts
-        self.occ_type = occ_type
-        self.point_cloud_range = [-50.0, -50.0, -5.0, 50.0, 50.0, 3.0]
-        if self.occ_type == 'normal':
-            self.occupancy_size = [0.5, 0.5, 0.5]
-        elif self.occ_type == 'fine':
-            self.occupancy_size = [0.25, 0.25, 0.25]
-        elif self.occ_type == 'coarse':
-            self.occupancy_size = [1.0, 1.0, 1.0]
-            
-        self.occ_xdim = int((self.point_cloud_range[3] - self.point_cloud_range[0]) / self.occupancy_size[0])
-        self.occ_ydim = int((self.point_cloud_range[4] - self.point_cloud_range[1]) / self.occupancy_size[1])
-        self.occ_zdim = int((self.point_cloud_range[5] - self.point_cloud_range[2]) / self.occupancy_size[2])
-        self.occupancy_classes = 16
-        self.voxel_num = self.occ_xdim*self.occ_ydim*self.occ_zdim
-        
-        self.train_with_partial_data = train_with_partial_data
-        if self.train_with_partial_data:
-            self.valid_scenes = set(np.load(os.path.join('data/nuscenes_train_splits', f'split_{split_divisor}.npy')))
-        
-        super().__init__(*args, **kwargs)
-        self.queue_length = queue_length
-        self.overlap_test = overlap_test
-        self.bev_size = bev_size
+            gt_names = set(info['gt_names'])
+
+        cat_ids = []
+        for name in gt_names:
+            if name in self.CLASSES:
+                cat_ids.append(self.cat2id[name])
+        return cat_ids
 
     def load_annotations(self, ann_file):
         """Load annotations from ann_file.
+
         Args:
             ann_file (str): Path of the annotation file.
+
         Returns:
             list[dict]: List of annotations sorted by timestamps.
         """
-
-        data = mmcv.load(ann_file)
-        if self.accumulate_infos is not None:  # To be deprecated
-            for i, info in enumerate(data['infos']):
-                info['lidar_path'] = self.accumulate_infos[i]['accumulate_lidar_path']
-        for i, info in enumerate(data['infos']):
-            if 'accumulate_lidar_path' in info:
-                info['lidar_path'] = info['accumulate_lidar_path']
-            if self.load_occ_post:
-                info['occ_gt_path'] = info['occ_gt_post_path']
-                info['flow_gt_path'] = info['flow_gt_post_path']
-            elif self.load_occ_lidarseg:
-                info['occ_gt_path'] = info['occ_gt_final_path']
-                info['flow_gt_path'] = info['flow_gt_final_path']
-        
-        data_infos = list(sorted(data['infos'], key=lambda e: e['timestamp']))
-        if self.train_with_partial_data:
-            data_infos = [info for info in data_infos if info['scene_name'] in self.valid_scenes]
+        data_infos = mmcv.load(ann_file.name)
         data_infos = data_infos[::self.load_interval]
-        self.metadata = data['metadata']
-        self.version = self.metadata['version']
         return data_infos
-        
-    def prepare_train_data(self, index):
-        """
-        Training data preparation.
-        Args:
-            index (int): Index for accessing the target data.
-        Returns:
-            dict: Training data dict of the corresponding index.
-        """
-        data_queue = []
-
-        # temporal aug
-        prev_indexs_list = list(range(index-self.queue_length, index))
-        random.shuffle(prev_indexs_list)
-        prev_indexs_list = sorted(prev_indexs_list[1:], reverse=True)
-
-        input_dict = self.get_data_info(index)
-        if input_dict is None:
-            return None
-        frame_idx = input_dict['frame_idx']
-        scene_token = input_dict['scene_token']
-        self.pre_pipeline(input_dict)
-        example = self.pipeline(input_dict)
-        if self.filter_empty_gt and \
-                (example is None or ~(example['gt_labels_3d']._data != -1).any()):
-            return None
-        data_queue.insert(0, example)
-        for i in prev_indexs_list:
-            i = max(0, i)
-            input_dict = self.get_data_info(i)
-            if input_dict is None:
-                return None
-            if input_dict['frame_idx'] < frame_idx and input_dict['scene_token'] == scene_token:
-                self.pre_pipeline(input_dict)
-                example = self.pipeline(input_dict)
-                if self.filter_empty_gt and \
-                        (example is None or ~(example['gt_labels_3d']._data != -1).any()):
-                    return None
-                frame_idx = input_dict['frame_idx']
-            data_queue.insert(0, copy.deepcopy(example))
-        return self.union2one(data_queue)
-
-    def union2one(self, queue):
-        """
-        convert sample queue into one single sample.
-        """
-        imgs_list = [each['img'].data for each in queue]
-        metas_map = {}
-        prev_pos = None
-        prev_angle = None
-        for i, each in enumerate(queue):
-            metas_map[i] = each['img_metas'].data
-            if i == 0:
-                metas_map[i]['prev_bev'] = False
-                prev_pos = copy.deepcopy(metas_map[i]['can_bus'][:3])
-                prev_angle = copy.deepcopy(metas_map[i]['can_bus'][-1])
-                metas_map[i]['can_bus'][:3] = 0
-                metas_map[i]['can_bus'][-1] = 0
-            else:
-                metas_map[i]['prev_bev'] = True
-                tmp_pos = copy.deepcopy(metas_map[i]['can_bus'][:3])
-                tmp_angle = copy.deepcopy(metas_map[i]['can_bus'][-1])
-                metas_map[i]['can_bus'][:3] -= prev_pos  # the delta position of adjacent timestamps
-                metas_map[i]['can_bus'][-1] -= prev_angle  # the delta orientation of adjacent timestamps
-                prev_pos = copy.deepcopy(tmp_pos)
-                prev_angle = copy.deepcopy(tmp_angle)
-
-        queue[-1]['img'] = DC(torch.stack(imgs_list),
-                              cpu_only=False, stack=True)
-        queue[-1]['img_metas'] = DC(metas_map, cpu_only=True)
-        if self.use_occ_gts:  # TODO
-            queue[-1]['gt_bboxes_3d'] = DC([each['gt_bboxes_3d'].data for each in queue], cpu_only=True)
-            queue[-1]['gt_labels_3d'] = DC([each['gt_labels_3d'].data for each in queue])
-            if 'occ_gts' in queue[-1]:
-                occ_gt_list = [each['occ_gts'].data for each in queue] 
-                queue[-1]['occ_gts'] = DC(occ_gt_list, cpu_only=False)
-            if 'flow_gts' in queue[-1]:
-                flow_gt_list = [each['flow_gts'].data for each in queue] 
-                queue[-1]['flow_gts'] = DC(flow_gt_list, cpu_only=False)
-        queue = queue[-1]
-        return queue
 
     def get_data_info(self, index):
         """Get data info according to the given index.
@@ -198,7 +215,7 @@ class CustomNuPlanDataset(NuScenesDataset):
             index (int): Index of the sample data to get.
 
         Returns:
-            dict: Data information that will be passed to the data \
+            dict: Data information that will be passed to the data
                 preprocessing pipelines. It includes the following keys:
 
                 - sample_idx (str): Sample index.
@@ -206,304 +223,454 @@ class CustomNuPlanDataset(NuScenesDataset):
                 - sweeps (list[dict]): Infos of sweeps.
                 - timestamp (float): Sample timestamp.
                 - img_filename (str, optional): Image filename.
-                - lidar2img (list[np.ndarray], optional): Transformations \
+                - lidar2img (list[np.ndarray], optional): Transformations
                     from lidar to different cameras.
                 - ann_info (dict): Annotation info.
         """
         info = self.data_infos[index]
-        # standard protocal modified from SECOND.Pytorch
+        
+        # standard protocol modified from SECOND.Pytorch
         input_dict = dict(
+            data_index=index,
             sample_idx=info['token'],
-            # pts_filename=info['lidar_path'],
-            sweeps=info['sweeps'],
-            ego2global_translation=info['ego2global_translation'],
-            ego2global_rotation=info['ego2global_rotation'],
-            prev_idx=info['prev'],
-            next_idx=info['next'],
-            scene_token=info['scene_token'],
-            can_bus=info['can_bus'],
-            frame_idx=info['frame_idx'],
+            pts_filename=osp.join(self.data_root, info['lidar_path']),
+            sweeps=[],
             timestamp=info['timestamp'] / 1e6,
+            curr=info
         )
 
-
-        if 'occ_gt_path' in info:
-            input_dict['occ_gt_path'] = info['occ_gt_path']
-        if 'flow_gt_path' in info:
-            input_dict['flow_gt_path'] = info['flow_gt_path']
-
+        if 'occ_gt_final_path' in info.keys():
+            input_dict['occ_gt_path'] = info['occ_gt_final_path']
+        
+        if 'ann_infos' in info:
+            input_dict['ann_infos'] = info['ann_infos']
         if self.modality['use_camera']:
-            image_paths = []
-            lidar2img_rts = []
-            lidar2cam_rts = []
-            cam_intrinsics = []
-            for cam_type, cam_info in info['cams'].items():
-                image_paths.append(cam_info['data_path'])
-                # obtain lidar to image transformation matrix
-                lidar2cam_r = np.linalg.inv(cam_info['sensor2lidar_rotation'])
-                lidar2cam_t = cam_info[
-                    'sensor2lidar_translation'] @ lidar2cam_r.T
-                lidar2cam_rt = np.eye(4)
-                lidar2cam_rt[:3, :3] = lidar2cam_r.T
-                lidar2cam_rt[3, :3] = -lidar2cam_t
-                intrinsic = cam_info['cam_intrinsic']
-                viewpad = np.eye(4)
-                viewpad[:intrinsic.shape[0], :intrinsic.shape[1]] = intrinsic
-                lidar2img_rt = (viewpad @ lidar2cam_rt.T)
-                lidar2img_rts.append(lidar2img_rt)
+            if self.img_info_prototype == 'mmcv':
+                image_paths = []
+                lidar2img_rts = []
+                for cam_type, cam_info in info['cams'].items():
+                    image_paths.append(cam_info['data_path'])
+                    # obtain lidar to image transformation matrix
+                    lidar2cam_r = np.linalg.inv(
+                        cam_info['sensor2lidar_rotation'])
+                    lidar2cam_t = cam_info[
+                        'sensor2lidar_translation'] @ lidar2cam_r.T
+                    lidar2cam_rt = np.eye(4)
+                    lidar2cam_rt[:3, :3] = lidar2cam_r.T
+                    lidar2cam_rt[3, :3] = -lidar2cam_t
+                    intrinsic = cam_info['cam_intrinsic']
+                    viewpad = np.eye(4)
+                    viewpad[:intrinsic.shape[0], :intrinsic.
+                            shape[1]] = intrinsic
+                    lidar2img_rt = (viewpad @ lidar2cam_rt.T)
+                    lidar2img_rts.append(lidar2img_rt)
 
-                cam_intrinsics.append(viewpad)
-                lidar2cam_rts.append(lidar2cam_rt.T)
+                input_dict.update(
+                    dict(
+                        img_filename=image_paths,
+                        lidar2img=lidar2img_rts,
+                    ))
 
-            input_dict.update(
-                dict(
-                    img_filename=image_paths,
-                    lidar2img=lidar2img_rts,
-                    cam_intrinsic=cam_intrinsics,
-                    lidar2cam=lidar2cam_rts,
-                ))
-
-        if not self.test_mode:
-            annos = self.get_ann_info(index)
-            input_dict['ann_info'] = annos
-
-        rotation = Quaternion(input_dict['ego2global_rotation'])
-        translation = input_dict['ego2global_translation']
-        can_bus = input_dict['can_bus']
-        can_bus[:3] = translation
-        can_bus[3:7] = rotation
-        patch_angle = quaternion_yaw(rotation) / np.pi * 180
-        if patch_angle < 0:
-            patch_angle += 360
-        can_bus[-2] = patch_angle / 180 * np.pi
-        can_bus[-1] = patch_angle
-
+                if not self.test_mode:
+                    annos = self.get_ann_info(index)
+                    input_dict['ann_info'] = annos
+            else:
+                assert 'bevdet' in self.img_info_prototype
+                input_dict.update(dict(curr=info))
+                if '4d' in self.img_info_prototype:
+                    info_adj_list = self.get_adj_info(info, index)
+                    input_dict.update(dict(adjacent=info_adj_list))
         return input_dict
 
-    def __getitem__(self, idx):
-        """Get item from infos according to the given index.
+    def get_adj_info(self, info, index):
+        info_adj_list = []
+        adj_id_list = list(range(*self.multi_adj_frame_id_cfg))
+        if self.stereo:
+            assert self.multi_adj_frame_id_cfg[0] == 1
+            assert self.multi_adj_frame_id_cfg[2] == 1
+            adj_id_list.append(self.multi_adj_frame_id_cfg[1])
+        for select_id in adj_id_list:
+            select_id = max(index - select_id, 0)
+            if not self.data_infos[select_id]['scene_token'] == info[
+                    'scene_token']:
+                info_adj_list.append(info)
+            else:
+                info_adj_list.append(self.data_infos[select_id])
+        return info_adj_list
+
+
+    def _format_bbox(self, results, jsonfile_prefix=None):
+        """Convert the results to the standard format.
+
+        Args:
+            results (list[dict]): Testing results of the dataset.
+            jsonfile_prefix (str): The prefix of the output jsonfile.
+                You can specify the output directory/filename by
+                modifying the jsonfile_prefix. Default: None.
+
         Returns:
-            dict: Data dictionary of the corresponding index.
+            str: Path of the output json file.
         """
-        if self.test_mode:
-            return self.prepare_test_data(idx)
-        while True:
+        nusc_annos = {}
+        mapped_class_names = self.CLASSES
 
-            data = self.prepare_train_data(idx)
-            if data is None:
-                idx = self._rand_another(idx)
-                continue
-            return data
+        print('Start to convert detection format...')
+        for sample_id, det in enumerate(mmcv.track_iter_progress(results)):
+            boxes = det['boxes_3d'].tensor.numpy()
+            scores = det['scores_3d'].numpy()
+            labels = det['labels_3d'].numpy()
+            sample_token = self.data_infos[sample_id]['token']
 
-    def evaluate_occ_iou(self, occupancy_results, flow_results, show_dir=None, 
-                         save_interval=1, occ_threshold=0.25, runner=None):
-        """ save the gt_occupancy_sparse and evaluate the iou metrics"""
-        assert len(occupancy_results) == len(self)
-        thre_str = 'thre_'+'{:.2f}'.format(occ_threshold)
-
-        if show_dir:  # save occ_gt, occ_pred, surround image
-            # pick 3 scenes for visualzation
-            scene_names = [info['scene_name'] for info in self.data_infos]
-            scene_names = np.unique(scene_names)
-            save_scene_names = scene_names[:3]
-            if len(occupancy_results) == 6019:
-                save_scene_names=['scene-0099', 'scene-0105', 'scene-0276', 'scene-0626']
-            elif len(occupancy_results) == 28130:
-                save_scene_names=['scene-0001', 'scene-0002', 'scene-0076', 'scene-0401']
-            else:
-                save_scene_names=['scene-0099', 'scene-0105', 'scene-0276', 'scene-0626']
-            print('save_scene_names:', save_scene_names)
-        
-        # set the metrics
-        near_distance=25
-        far_distance=25
-        self.eval_metrics = SSCMetrics(self.occupancy_classes, 
-                                       near_distance=near_distance, 
-                                       far_distance=far_distance,
-                                       occ_type=self.occ_type)  
-        self.eval_metrics_valid = SSCMetrics(self.occupancy_classes,
-                                             near_distance=near_distance, 
-                                             far_distance=far_distance,
-                                             occ_type=self.occ_type)
-        # loop the dataset
-        for index in tqdm(range(len(occupancy_results))):
-            info = self.data_infos[index]
-            scene_name = info['scene_name']
-            frame_idx = info['frame_idx']
-            
-            # load occ_gt
-            occ_gt_sparse = np.load(info['occ_gt_path'])
-            occ_index = occ_gt_sparse[:, 0]
-            occ_class = occ_gt_sparse[:, 1] 
-            gt_occupancy = np.ones(self.voxel_num, dtype=np.int32)*self.occupancy_classes
-            gt_occupancy[occ_index] = occ_class  # (num_voxels)
-
-            # load occ_invalid
-            if 'occ_invalid_path' in info:
-                occ_invalid_index = np.load(info['occ_invalid_path'])
-                invalid_occupancy = np.ones(self.voxel_num, dtype=np.int32)
-                invalid_occupancy[occ_invalid_index] = 255
-            else:
-                invalid_occupancy = None
-            #  load occ_pred
-            occ_pred_sparse = occupancy_results[index].cpu().numpy()
-            pred_occupancy = self.get_voxel_prediction(occ_pred_sparse)
-
-            # load flow info
-            flow_pred, flow_true = None, None
-            if flow_results is not None:
-                flow_pred_sparse = flow_results[index].cpu().numpy()
-                flow_gt_sparse = np.load(info['flow_gt_path']) 
-                flow_true, flow_pred = self.parse_flow_info(occ_gt_sparse, occ_pred_sparse, flow_gt_sparse, flow_pred_sparse)
-
-            # using ssc metrics within a batch
-            y_pred = np.expand_dims(pred_occupancy, axis=0)  # (1, 640000)
-            y_true = np.expand_dims(gt_occupancy, axis=0)  # (1, 640000)
-            if invalid_occupancy is not None:
-                invalid_mask = np.expand_dims(invalid_occupancy, axis=0)
-            else:
-                invalid_mask = None
-            self.eval_metrics.add_batch(y_pred, y_true, flow_pred=flow_pred, flow_true=flow_true)
-
-            self.eval_metrics_valid.add_batch(y_pred, y_true, flow_pred=flow_pred, flow_true=flow_true, invalid=invalid_mask)
-
-            # save occ, flow, image
-            if show_dir and index % save_interval == 0:
-                save_result = False
-                if scene_name in save_scene_names:
-                    save_result = True
-                save_result = True   # TODO  save all samples ???
-                if save_result:
-                    occ_gt_save_dir = os.path.join(show_dir, thre_str, scene_name, 'occ_gts')
-                    occ_pred_save_dir = os.path.join(show_dir, thre_str, scene_name, 'occ_preds')
-                    image_save_dir = os.path.join(show_dir, thre_str, scene_name, 'images')
-                    os.makedirs(occ_gt_save_dir, exist_ok=True)
-                    os.makedirs(occ_pred_save_dir, exist_ok=True)
-                    os.makedirs(image_save_dir, exist_ok=True)
-
-                    np.save(osp.join(occ_gt_save_dir, '{:03d}_occ.npy'.format(frame_idx)), occ_gt_sparse)  
-                    np.save(osp.join(occ_pred_save_dir, '{:03d}_occ.npy'.format(frame_idx)), occ_pred_sparse)  
-                    if invalid_occupancy is not None:  # save prediction masked by invalid
-                        occ_pred_valid = self.obtain_occ_pred_valid(occ_pred_sparse, invalid_occupancy)
-                        np.save(osp.join(occ_pred_save_dir, '{:03d}_occ_valid.npy'.format(frame_idx)), occ_pred_valid)
-
-                    if flow_results is not None:
-                        np.save(osp.join(occ_gt_save_dir, '{:03d}_flow.npy'.format(frame_idx)), flow_gt_sparse)  
-                        np.save(osp.join(occ_pred_save_dir, '{:03d}_flow.npy'.format(frame_idx)), flow_pred_sparse)
-                        if invalid_occupancy is not None:  # save prediction masked by invalid
-                            flow_pred_valid = self.obtain_flow_pred_valid(occ_pred_sparse, flow_pred_sparse, invalid_occupancy)
-                            np.save(osp.join(occ_pred_save_dir, '{:03d}_flow_valid.npy'.format(frame_idx)), flow_pred_valid)
-
-                    image_save_path = osp.join(image_save_dir, '{:03d}.png'.format(frame_idx))
-                    if 'surround_image_path' in info:
-                        shutil.copyfile(info['surround_image_path'], image_save_path)
-        # dataset metrics  11 classes
-        self.class_names = ['vehicle', 'place_holder1', 'place_holder2', 'place_holder3', 'czone_sign', 'bicycle', 'generic_object', 'pedestrian', 'traffic_cone', 'barrier','background']
-        stats = self.eval_metrics.get_stats()
-        stats_valid = self.eval_metrics_valid.get_stats()
-        print(f'======out evaluation metrics: {thre_str}=========')
-        for eval_index, eval_resuslt in enumerate([stats, stats_valid]):
-            if eval_index == 0:
-                print('=====do not consider the invalid region')
-            else:
-                print(' ')
-                print('=====considering the invalid region')
-            for i, class_name in enumerate(self.class_names):
-                print("miou/{}: {:.2f}".format(class_name, eval_resuslt["iou_ssc"][i]))
-            print("miou: {:.2f}".format(eval_resuslt["miou"]))
-            print("iou: {:.2f}".format(eval_resuslt["iou"]))
-            print("Precision: {:.4f}".format(eval_resuslt["precision"]))
-            print("Recall: {:.4f}".format(eval_resuslt["recall"]))
-            
-            # foreground object
-            print("foreground_iou: {:.2f}".format(eval_resuslt["foreground_iou"]))
-            print("foreground_precision: {:.4f}".format(eval_resuslt["foreground_precision"]))
-            print("foreground_recall: {:.4f}".format(eval_resuslt["foreground_recall"]))
-            print("foreground_miou: {:.2f}".format(eval_resuslt["foreground_miou"]))
-    
-            flow_distance = eval_resuslt['flow_distance']
-            flow_states=['flow_distance_sta', 'flow_distance_mov', 'flow_distance_all']
-            for i in range(len(flow_states)):
-                if flow_distance[i] is not None:
-                    print("{}: {:.4f}".format(flow_states[i], flow_distance[i]))
-            
-            if eval_resuslt['far_metrics'] is not None:
-                print('')
-                print('far distance:', far_distance)
-                far_metrics_dict = eval_resuslt['far_metrics']
-                for key in far_metrics_dict:
-                    if key!= 'far_iou_ssc':
-                        print("{}: {:.2f}".format(key, far_metrics_dict[key]))
+            trans = self.data_infos[sample_id]['cams'][
+                self.ego_cam]['ego2global_translation']
+            rot = self.data_infos[sample_id]['cams'][
+                self.ego_cam]['ego2global_rotation']
+            rot = pyquaternion.Quaternion(rot)
+            annos = list()
+            for i, box in enumerate(boxes):
+                name = mapped_class_names[labels[i]]
+                center = box[:3]
+                wlh = box[[4, 3, 5]]
+                box_yaw = box[6]
+                box_vel = box[7:].tolist()
+                box_vel.append(0)
+                quat = pyquaternion.Quaternion(axis=[0, 0, 1], radians=box_yaw)
+                nusc_box = NuScenesBox(center, wlh, quat, velocity=box_vel)
+                nusc_box.rotate(rot)
+                nusc_box.translate(trans)
+                if np.sqrt(nusc_box.velocity[0]**2 +
+                           nusc_box.velocity[1]**2) > 0.2:
+                    if name in [
+                            'car',
+                            'construction_vehicle',
+                            'bus',
+                            'truck',
+                            'trailer',
+                    ]:
+                        attr = 'vehicle.moving'
+                    elif name in ['bicycle', 'motorcycle']:
+                        attr = 'cycle.with_rider'
                     else:
-                        for i, class_name in enumerate(self.class_names):
-                            if i < 10:
-                                print("far_miou/{}: {:.2f}".format(class_name, far_metrics_dict[key][i]))
-            
-            if eval_resuslt['near_metrics'] is not None:
-                print('')
-                print('near distance:', near_distance)
-                near_metrics_dict = eval_resuslt['near_metrics']
-                for key in near_metrics_dict:
-                    if key!= 'near_iou_ssc':
-                        print("{}: {:.2f}".format(key, near_metrics_dict[key]))
+                        attr = self.DefaultAttribute[name]
+                else:
+                    if name in ['pedestrian']:
+                        attr = 'pedestrian.standing'
+                    elif name in ['bus']:
+                        attr = 'vehicle.stopped'
                     else:
-                        for i, class_name in enumerate(self.class_names):
-                            if i < 10:
-                                print("near_miou/{}: {:.2f}".format(class_name, near_metrics_dict[key][i]))
-            
-            
-            if eval_index == 1 and runner is not None:
-                for i, class_name in enumerate(self.class_names):
-                    runner.log_buffer.output[class_name] =  eval_resuslt["iou_ssc"][i]
-                runner.log_buffer.output['miou'] =  eval_resuslt["miou"]
-                runner.log_buffer.output['iou'] =  eval_resuslt["iou"]
-                runner.log_buffer.output['precision'] =  eval_resuslt["precision"]
-                runner.log_buffer.output['recall'] =  eval_resuslt["recall"]
-                
-                runner.log_buffer.ready = True
-                
-    
-    def obtain_occ_pred_valid(self, occ_pred_sparse, invalid_occupancy):
-        occ_index, occ_class = occ_pred_sparse[:, 0], occ_pred_sparse[:, 1]
-        occ_pred_full = np.ones(self.voxel_num, dtype=np.int32)*self.occupancy_classes
-        occ_pred_full[occ_index] = occ_class
-        valid_mask = (occ_pred_full != self.occupancy_classes) & (invalid_occupancy != 255)
-        occ_pred_valid_index = np.where(valid_mask)[0]
-        occ_pred_valid_label = occ_pred_full[valid_mask]
-        occ_pred_valid = np.stack([occ_pred_valid_index, occ_pred_valid_label], axis=-1)
-        # print(occ_pred_valid.shape)
-        return occ_pred_valid
-    
-    def obtain_flow_pred_valid(self, occ_pred_sparse, flow_pred_sparse, invalid_occupancy):
-        occ_index, occ_class = occ_pred_sparse[:, 0], occ_pred_sparse[:, 1]
-        occ_pred_full = np.ones(self.voxel_num, dtype=np.int32)*self.occupancy_classes
-        occ_pred_full[occ_index] = occ_class
-        flow_pred_full = np.zeros((self.voxel_num, 2), dtype=np.float32)
-        flow_pred_full[occ_index] = flow_pred_sparse
-        valid_mask = (occ_pred_full != self.occupancy_classes) & (invalid_occupancy != 255)
-        flow_pred_valid = flow_pred_full[valid_mask]
-        return flow_pred_valid
+                        attr = self.DefaultAttribute[name]
+                nusc_anno = dict(
+                    sample_token=sample_token,
+                    translation=nusc_box.center.tolist(),
+                    size=nusc_box.wlh.tolist(),
+                    rotation=nusc_box.orientation.elements.tolist(),
+                    velocity=nusc_box.velocity[:2],
+                    detection_name=name,
+                    detection_score=float(scores[i]),
+                    attribute_name=attr,
+                )
+                annos.append(nusc_anno)
+            # other views results of the same frame should be concatenated
+            if sample_token in nusc_annos:
+                nusc_annos[sample_token].extend(annos)
+            else:
+                nusc_annos[sample_token] = annos
+        nusc_submissions = {
+            'meta': self.modality,
+            'results': nusc_annos,
+        }
 
+        mmcv.mkdir_or_exist(jsonfile_prefix)
+        res_path = osp.join(jsonfile_prefix, 'results_nusc.json')
+        print('Results writes to', res_path)
+        mmcv.dump(nusc_submissions, res_path)
+        return res_path
 
-    def get_voxel_prediction(self, occupancy):
-        occ_index = occupancy[:, 0]
-        occ_class = occupancy[:, 1]
-        pred_occupancy = np.ones(self.voxel_num, dtype=np.int32)*self.occupancy_classes
-        pred_occupancy[occ_index] = occ_class  # (num_voxels)
-        return pred_occupancy
-    
-    def parse_flow_info(self, occ_gt, occ_pred, flow_gt, flow_pred):
+    def _evaluate_single(self,
+                         result_path,
+                         logger=None,
+                         metric='bbox',
+                         result_name='pts_bbox'):
+        """Evaluation for a single model in nuScenes protocol.
+
+        Args:
+            result_path (str): Path of the result file.
+            logger (logging.Logger | str, optional): Logger used for printing
+                related information during evaluation. Default: None.
+            metric (str, optional): Metric name used for evaluation.
+                Default: 'bbox'.
+            result_name (str, optional): Result name in the metric prefix.
+                Default: 'pts_bbox'.
+
+        Returns:
+            dict: Dictionary of evaluation details.
         """
-        transform sparse data into consecutive data
+        from nuscenes import NuScenes
+        from nuscenes.eval.detection.evaluate import NuScenesEval
+
+        output_dir = osp.join(*osp.split(result_path)[:-1])
+        nusc = NuScenes(
+            version=self.version, dataroot=self.data_root, verbose=False)
+        eval_set_map = {
+            'v1.0-mini': 'mini_val',
+            'v1.0-trainval': 'val',
+        }
+        nusc_eval = NuScenesEval(
+            nusc,
+            config=self.eval_detection_configs,
+            result_path=result_path,
+            eval_set=eval_set_map[self.version],
+            output_dir=output_dir,
+            verbose=False)
+        nusc_eval.main(render_curves=False)
+
+        # record metrics
+        metrics = mmcv.load(osp.join(output_dir, 'metrics_summary.json'))
+        detail = dict()
+        metric_prefix = f'{result_name}_NuScenes'
+        for name in self.CLASSES:
+            for k, v in metrics['label_aps'][name].items():
+                val = float('{:.4f}'.format(v))
+                detail['{}/{}_AP_dist_{}'.format(metric_prefix, name, k)] = val
+            for k, v in metrics['label_tp_errors'][name].items():
+                val = float('{:.4f}'.format(v))
+                detail['{}/{}_{}'.format(metric_prefix, name, k)] = val
+            for k, v in metrics['tp_errors'].items():
+                val = float('{:.4f}'.format(v))
+                detail['{}/{}'.format(metric_prefix,
+                                      self.ErrNameMapping[k])] = val
+
+        detail['{}/NDS'.format(metric_prefix)] = metrics['nd_score']
+        detail['{}/mAP'.format(metric_prefix)] = metrics['mean_ap']
+        return detail
+
+    def format_results(self, results, jsonfile_prefix=None):
+        """Format the results to json (standard format for COCO evaluation).
+
+        Args:
+            results (list[dict]): Testing results of the dataset.
+            jsonfile_prefix (str): The prefix of json files. It includes
+                the file path and the prefix of filename, e.g., "a/b/prefix".
+                If not specified, a temp file will be created. Default: None.
+
+        Returns:
+            tuple: Returns (result_files, tmp_dir), where `result_files` is a
+                dict containing the json filepaths, `tmp_dir` is the temporal
+                directory created for saving json files when
+                `jsonfile_prefix` is not specified.
         """
-        occ_gt_index = occ_gt[:, 0]
-        flow_gt_full = np.zeros((self.voxel_num, 2), dtype=np.float32)
-        flow_gt_full[occ_gt_index] = flow_gt
+        assert isinstance(results, list), 'results must be a list'
+        assert len(results) == len(self), (
+            'The length of results is not equal to the dataset len: {} != {}'.
+            format(len(results), len(self)))
 
-        occ_pred_index = occ_pred[:, 0]
-        flow_pred_full = np.zeros((self.voxel_num, 2), dtype=np.float32)
-        flow_pred_full[occ_pred_index] = flow_pred
+        if jsonfile_prefix is None:
+            tmp_dir = tempfile.TemporaryDirectory()
+            jsonfile_prefix = osp.join(tmp_dir.name, 'results')
+        else:
+            tmp_dir = None
 
-        flow_gt_full = np.expand_dims(flow_gt_full, axis=0)  # (1, 640000, 2)
-        flow_pred_full = np.expand_dims(flow_pred_full, axis=0)   # (1, 640000, 2)
-        return flow_gt_full, flow_pred_full
+        # currently the output prediction results could be in two formats
+        # 1. list of dict('boxes_3d': ..., 'scores_3d': ..., 'labels_3d': ...)
+        # 2. list of dict('pts_bbox' or 'img_bbox':
+        #     dict('boxes_3d': ..., 'scores_3d': ..., 'labels_3d': ...))
+        # this is a workaround to enable evaluation of both formats on nuScenes
+        # refer to https://github.com/open-mmlab/mmdetection3d/issues/449
+        if not ('pts_bbox' in results[0] or 'img_bbox' in results[0]):
+            result_files = self._format_bbox(results, jsonfile_prefix)
+        else:
+            # should take the inner dict out of 'pts_bbox' or 'img_bbox' dict
+            result_files = dict()
+            for name in results[0]:
+                print(f'\nFormating bboxes of {name}')
+                results_ = [out[name] for out in results]
+                tmp_file_ = osp.join(jsonfile_prefix, name)
+                result_files.update(
+                    {name: self._format_bbox(results_, tmp_file_)})
+        return result_files, tmp_dir
+
+    def evaluate(self,
+                 results,
+                 metric='bbox',
+                 logger=None,
+                 jsonfile_prefix=None,
+                 result_names=['pts_bbox'],
+                 show=False,
+                 out_dir=None,
+                 pipeline=None):
+        """Evaluation in nuScenes protocol.
+
+        Args:
+            results (list[dict]): Testing results of the dataset.
+            metric (str | list[str], optional): Metrics to be evaluated.
+                Default: 'bbox'.
+            logger (logging.Logger | str, optional): Logger used for printing
+                related information during evaluation. Default: None.
+            jsonfile_prefix (str, optional): The prefix of json files including
+                the file path and the prefix of filename, e.g., "a/b/prefix".
+                If not specified, a temp file will be created. Default: None.
+            show (bool, optional): Whether to visualize.
+                Default: False.
+            out_dir (str, optional): Path to save the visualization results.
+                Default: None.
+            pipeline (list[dict], optional): raw data loading for showing.
+                Default: None.
+
+        Returns:
+            dict[str, float]: Results of each evaluation metric.
+        """
+        result_files, tmp_dir = self.format_results(results, jsonfile_prefix)
+
+        if isinstance(result_files, dict):
+            results_dict = dict()
+            for name in result_names:
+                print('Evaluating bboxes of {}'.format(name))
+                ret_dict = self._evaluate_single(result_files[name])
+            results_dict.update(ret_dict)
+        elif isinstance(result_files, str):
+            results_dict = self._evaluate_single(result_files)
+
+        if tmp_dir is not None:
+            tmp_dir.cleanup()
+
+        if show or out_dir:
+            self.show(results, out_dir, show=show, pipeline=pipeline)
+        return results_dict
+
+    def _build_default_pipeline(self):
+        """Build the default pipeline for this dataset."""
+        pipeline = [
+            dict(
+                type='LoadPointsFromFile',
+                coord_type='LIDAR',
+                load_dim=5,
+                use_dim=5,
+                file_client_args=dict(backend='disk')),
+            dict(
+                type='LoadPointsFromMultiSweeps',
+                sweeps_num=10,
+                file_client_args=dict(backend='disk')),
+            dict(
+                type='DefaultFormatBundle3D',
+                class_names=self.CLASSES,
+                with_label=False),
+            dict(type='Collect3D', keys=['points'])
+        ]
+        return Compose(pipeline)
+
+    def show(self, results, out_dir, show=False, pipeline=None):
+        """Results visualization.
+
+        Args:
+            results (list[dict]): List of bounding boxes results.
+            out_dir (str): Output directory of visualization result.
+            show (bool): Whether to visualize the results online.
+                Default: False.
+            pipeline (list[dict], optional): raw data loading for showing.
+                Default: None.
+        """
+        assert out_dir is not None, 'Expect out_dir, got none.'
+        pipeline = self._get_pipeline(pipeline)
+        for i, result in enumerate(results):
+            if 'pts_bbox' in result.keys():
+                result = result['pts_bbox']
+            data_info = self.data_infos[i]
+            pts_path = data_info['lidar_path']
+            file_name = osp.split(pts_path)[-1].split('.')[0]
+            points = self._extract_data(i, pipeline, 'points').numpy()
+            # for now we convert points into depth mode
+            points = Coord3DMode.convert_point(points, Coord3DMode.LIDAR,
+                                               Coord3DMode.DEPTH)
+            inds = result['scores_3d'] > 0.1
+            gt_bboxes = self.get_ann_info(i)['gt_bboxes_3d'].tensor.numpy()
+            show_gt_bboxes = Box3DMode.convert(gt_bboxes, Box3DMode.LIDAR,
+                                               Box3DMode.DEPTH)
+            pred_bboxes = result['boxes_3d'][inds].tensor.numpy()
+            show_pred_bboxes = Box3DMode.convert(pred_bboxes, Box3DMode.LIDAR,
+                                                 Box3DMode.DEPTH)
+            show_result(points, show_gt_bboxes, show_pred_bboxes, out_dir,
+                        file_name, show)
+
+
+def output_to_nusc_box(detection, with_velocity=True):
+    """Convert the output to the box class in the nuScenes.
+
+    Args:
+        detection (dict): Detection results.
+
+            - boxes_3d (:obj:`BaseInstance3DBoxes`): Detection bbox.
+            - scores_3d (torch.Tensor): Detection scores.
+            - labels_3d (torch.Tensor): Predicted box labels.
+
+    Returns:
+        list[:obj:`NuScenesBox`]: List of standard NuScenesBoxes.
+    """
+    box3d = detection['boxes_3d']
+    scores = detection['scores_3d'].numpy()
+    labels = detection['labels_3d'].numpy()
+
+    box_gravity_center = box3d.gravity_center.numpy()
+    box_dims = box3d.dims.numpy()
+    box_yaw = box3d.yaw.numpy()
+
+    # our LiDAR coordinate system -> nuScenes box coordinate system
+    nus_box_dims = box_dims[:, [1, 0, 2]]
+
+    box_list = []
+    for i in range(len(box3d)):
+        quat = pyquaternion.Quaternion(axis=[0, 0, 1], radians=box_yaw[i])
+        if with_velocity:
+            velocity = (*box3d.tensor[i, 7:9], 0.0)
+        else:
+            velocity = (0, 0, 0)
+        # velo_val = np.linalg.norm(box3d[i, 7:9])
+        # velo_ori = box3d[i, 6]
+        # velocity = (
+        # velo_val * np.cos(velo_ori), velo_val * np.sin(velo_ori), 0.0)
+        box = NuScenesBox(
+            box_gravity_center[i],
+            nus_box_dims[i],
+            quat,
+            label=labels[i],
+            score=scores[i],
+            velocity=velocity)
+        box_list.append(box)
+    return box_list
+
+
+def lidar_nusc_box_to_global(info,
+                             boxes,
+                             classes,
+                             eval_configs,
+                             eval_version='detection_cvpr_2019'):
+    """Convert the box from ego to global coordinate.
+
+    Args:
+        info (dict): Info for a specific sample data, including the
+            calibration information.
+        boxes (list[:obj:`NuScenesBox`]): List of predicted NuScenesBoxes.
+        classes (list[str]): Mapped classes in the evaluation.
+        eval_configs (object): Evaluation configuration object.
+        eval_version (str, optional): Evaluation version.
+            Default: 'detection_cvpr_2019'
+
+    Returns:
+        list: List of standard NuScenesBoxes in the global
+            coordinate.
+    """
+    box_list = []
+    for box in boxes:
+        # Move box to ego vehicle coord system
+        box.rotate(pyquaternion.Quaternion(info['lidar2ego_rotation']))
+        box.translate(np.array(info['lidar2ego_translation']))
+        # filter det in ego.
+        cls_range_map = eval_configs.class_range
+        radius = np.linalg.norm(box.center[:2], 2)
+        det_range = cls_range_map[classes[box.label]]
+        if radius > det_range:
+            continue
+        # Move box to global coord system
+        box.rotate(pyquaternion.Quaternion(info['ego2global_rotation']))
+        box.translate(np.array(info['ego2global_translation']))
+        box_list.append(box)
+    return box_list

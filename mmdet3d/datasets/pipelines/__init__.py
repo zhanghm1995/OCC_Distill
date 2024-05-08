@@ -8,6 +8,9 @@ from .loading import (LoadAnnotations3D, LoadAnnotationsBEVDepth,
                       LoadPointsFromMultiSweeps, NormalizePointsColor,
                       PointSegClassMapping, PointToMultiViewDepth,
                       PrepareImageInputs, LoadOccGTFromFile, PointToEgo)
+from .nuplan_loading import (LoadNuPlanPointsFromFile, LoadNuPlanPointsFromMultiSweeps,
+                             OpenScenePointToMultiViewDepth)
+
 from .test_time_aug import MultiScaleFlipAug3D
 # yapf: disable
 from .transforms_3d import (AffineResize, BackgroundPointsFilter,
@@ -36,5 +39,6 @@ __all__ = [
     'RangeLimitedRandomCrop', 'PrepareImageInputs',
     'LoadAnnotationsBEVDepth', 'PointToMultiViewDepth',
     'LoadOccGTFromFile', 'PointToEgo', 'PointsConditionalFlip',
-    'PointsOCCAugmentation'
+    'PointsOCCAugmentation', 'LoadNuPlanPointsFromFile', 'LoadNuPlanPointsFromMultiSweeps',
+    'OpenScenePointToMultiViewDepth'
 ]

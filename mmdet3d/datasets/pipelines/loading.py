@@ -1379,6 +1379,40 @@ class PrepareImageInputs(object):
 
 
 @PIPELINES.register_module()
+class PrepareOpenSceneImageInputs(PrepareImageInputs):
+    """In OpenScene dataset, the ego coordiniate and lidar coordinate are the same.
+
+    Args:
+        PrepareImageInputs (_type_): _description_
+    """
+    def get_sensor_transforms(self, cam_info, cam_name):
+        # sensor to lidar/ego, note that lidar and ego are the same
+        sensor2ego_rot = torch.Tensor(
+            cam_info['cams'][cam_name]['sensor2lidar_rotation'])
+        sensor2ego_tran = torch.Tensor(
+            cam_info['cams'][cam_name]['sensor2lidar_translation'])
+        sensor2ego = sensor2ego_rot.new_zeros((4, 4))
+        sensor2ego[3, 3] = 1
+        sensor2ego[:3, :3] = sensor2ego_rot
+        sensor2ego[:3, -1] = sensor2ego_tran
+        
+        # ego to global
+        w, x, y, z = cam_info['ego2global_rotation']
+        ego2global_rot = torch.Tensor(
+            Quaternion(w, x, y, z).rotation_matrix)
+        
+        ego2global_tran = torch.Tensor(
+            cam_info['ego2global_translation'])
+        ego2global = ego2global_rot.new_zeros((4, 4))
+        ego2global[3, 3] = 1
+        ego2global[:3, :3] = ego2global_rot
+        ego2global[:3, -1] = ego2global_tran
+
+        return sensor2ego, ego2global
+
+
+
+@PIPELINES.register_module()
 class PrepareRoboDriveImageInputs(PrepareImageInputs):
     """In RoboDrive dataset, the occupancy is defined in the LiDAR coodinate.
 
@@ -2092,6 +2126,70 @@ class LoadAnnotationsBEVDepth(object):
                 results['mask_camera_free'] = results['mask_camera_free'][:,::-1,...].copy()
         return results
     
+
+@PIPELINES.register_module()
+class LoadOpenSceneAnnotationsBEVDepth(object):
+
+    def __init__(self, bda_aug_conf, classes, is_train=True):
+        self.bda_aug_conf = bda_aug_conf
+        self.is_train = is_train
+        self.classes = classes
+
+    def sample_bda_augmentation(self):
+        """Generate bda augmentation values based on bda_config."""
+        if self.is_train:
+            rotate_bda = np.random.uniform(*self.bda_aug_conf['rot_lim'])
+            scale_bda = np.random.uniform(*self.bda_aug_conf['scale_lim'])
+            flip_dx = np.random.uniform() < self.bda_aug_conf['flip_dx_ratio']
+            flip_dy = np.random.uniform() < self.bda_aug_conf['flip_dy_ratio']
+        else:
+            rotate_bda = 0
+            scale_bda = 1.0
+            flip_dx = False
+            flip_dy = False
+        return rotate_bda, scale_bda, flip_dx, flip_dy
+
+    def bev_transform(self, rotate_angle, scale_ratio, flip_dx, flip_dy):
+        rotate_angle = torch.tensor(rotate_angle / 180 * np.pi)
+        rot_sin = torch.sin(rotate_angle)
+        rot_cos = torch.cos(rotate_angle)
+        rot_mat = torch.Tensor([[rot_cos, -rot_sin, 0], [rot_sin, rot_cos, 0],
+                                [0, 0, 1]])
+        scale_mat = torch.Tensor([[scale_ratio, 0, 0], [0, scale_ratio, 0],
+                                  [0, 0, scale_ratio]])
+        flip_mat = torch.Tensor([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
+        if flip_dx:
+            flip_mat = flip_mat @ torch.Tensor([[-1, 0, 0], [0, 1, 0],
+                                                [0, 0, 1]])
+        if flip_dy:
+            flip_mat = flip_mat @ torch.Tensor([[1, 0, 0], [0, -1, 0],
+                                                [0, 0, 1]])
+        rot_mat = flip_mat @ (scale_mat @ rot_mat)
+        return rot_mat
+
+    def __call__(self, results):
+        rotate_bda, scale_bda, flip_dx, flip_dy = self.sample_bda_augmentation()
+        bda_mat = torch.zeros(4, 4)
+        bda_mat[3, 3] = 1
+        bda_rot = self.bev_transform(rotate_bda, scale_bda, flip_dx, flip_dy)
+        bda_mat[:3, :3] = bda_rot
+        
+        imgs, rots, trans, intrins = results['img_inputs'][:4]
+        post_rots, post_trans = results['img_inputs'][4:]
+        results['img_inputs'] = (imgs, rots, trans, intrins, post_rots,
+                                 post_trans, bda_rot)
+        
+        ## We use these two conditions in PointsConditionalFlip transform
+        results['flip_dx'] = flip_dx
+        results['flip_dy'] = flip_dy
+        
+        if 'voxel_semantics' in results:
+            if flip_dx:
+                results['voxel_semantics'] = results['voxel_semantics'][::-1,...].copy()
+            if flip_dy:
+                results['voxel_semantics'] = results['voxel_semantics'][:,::-1,...].copy()
+        return results
+
 
 @PIPELINES.register_module()
 class LoadAnnotationsBEVDepthForTTA(object):

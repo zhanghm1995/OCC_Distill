@@ -9,6 +9,7 @@ from .bevdet_occ_pretrain import BEVStereo4DOCCPretrain, BEVStereo4DOCCTemporalN
 from .bevdet_occ_ssc import BEVFusionStereo4DSSCOCC
 from .bevdet_occ_gs import BEVStereo4DOCCGS
 from .bevdet_fusion_occ import BEVFusionStereo4DOCCNeRF
+from .bevdet_occ_openscene import BEVFusionStereo4DOCCOpenScene
 from .bevdet_lidar_occ import BEVLidarOCC, LidarOCC
 from .bevdet_occ_robodrive import BEVStereo4DOCCRoboDrive
 from .render_occ import BEVDetRenderOcc
@@ -52,5 +53,5 @@ __all__ = [
     'BEVStereo4DSSCOCCNeRF', 'BEVFusionStereo4DOCCNeRF',
     'BEVStereo4DOCCSegmentorDense', 'MyBEVStereo4DOCCNeRFVisualizer',
     'BEVFusionOCCLidarSupervise', 'BEVFusionOCCLidarSegSupervise', 'BEVDetRenderOcc',
-    'BEVStereo4DOCCRoboDrive'
+    'BEVStereo4DOCCRoboDrive', 'BEVFusionStereo4DOCCOpenScene'
 ]
