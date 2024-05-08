@@ -34,6 +34,8 @@ from .sunrgbd_dataset import SUNRGBDDataset
 from .utils import get_loading_pipeline
 from .waymo_dataset import WaymoDataset
 
+from .nuplan_dataset2 import CustomNuPlanDataset2
+
 __all__ = [
     'KittiDataset', 'KittiMonoDataset', 'build_dataloader', 'DATASETS',
     'build_dataset', 'NuScenesDataset', 'NuScenesMonoDataset', 'LyftDataset',
