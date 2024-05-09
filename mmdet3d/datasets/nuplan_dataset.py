@@ -143,7 +143,7 @@ class CustomNuPlanDataset(Custom3DDataset):
                  multi_adj_frame_id_cfg=None,
                  ego_cam='CAM_FRONT',
                  stereo=False,
-                 pred_binary_occ=True):
+                 pred_binary_occ=False):
         self.load_interval = load_interval
         self.use_valid_flag = use_valid_flag
         super().__init__(
