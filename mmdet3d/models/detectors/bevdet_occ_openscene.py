@@ -28,17 +28,28 @@ class BEVFusionStereo4DOCCOpenScene(BEVFusionStereo4DOCC):
     """
 
     def __init__(self,
+                 pred_binary_occ=False,
                  **kwargs):
         super(BEVFusionStereo4DOCCOpenScene, self).__init__(**kwargs)
+
+        self.pred_binary_occ = pred_binary_occ
 
         assert not self.use_mask, 'visibility mask is not supported for OpenScene dataset'
         
     def loss_single(self, voxel_semantics, preds):
         loss_ = dict()
-        voxel_semantics=voxel_semantics.long()
+        voxel_semantics = voxel_semantics.long()
         voxel_semantics = voxel_semantics.reshape(-1)
         preds = preds.reshape(-1, self.num_classes)
-        loss_occ = self.loss_occ(preds, voxel_semantics,)
+
+        if not self.pred_binary_occ:
+            loss_occ = self.loss_occ(preds, voxel_semantics)
+        else:
+            # predict binary occupancy, 0 is occupied, 1 is free
+            density_target = (voxel_semantics == 11).long()
+
+            loss_occ = self.loss_occ(preds, density_target)
+        
         loss_['loss_occ'] = loss_occ
         return loss_
 
@@ -55,9 +66,15 @@ class BEVFusionStereo4DOCCOpenScene(BEVFusionStereo4DOCC):
         # bncdhw->bnwhdc
         if self.use_predicter:
             occ_pred = self.predicter(occ_pred)
-        occ_score=occ_pred.softmax(-1)
-        occ_res=occ_score.argmax(-1)
-        occ_res = occ_res.squeeze(dim=0).cpu().numpy().astype(np.uint8)
+        
+        if not self.pred_binary_occ:
+            occ_score = occ_pred.softmax(-1)
+            occ_res = occ_score.argmax(-1)
+            occ_res = occ_res.squeeze(dim=0).cpu().numpy().astype(np.uint8)
+        else:
+            density_score = occ_pred.softmax(-1)
+            no_empty_mask = density_score[..., 0] > density_score[..., 1]
+            occ_res = no_empty_mask.squeeze(dim=0).cpu().numpy().astype(np.uint8)
         return [occ_res]
     
     def forward_train(self,
@@ -88,40 +105,3 @@ class BEVFusionStereo4DOCCOpenScene(BEVFusionStereo4DOCC):
         losses.update(loss_occ)
         return losses
     
-    def forward_test(self,
-                     points=None,
-                     img_metas=None,
-                     img_inputs=None,
-                     **kwargs):
-        """
-        Args:
-            points (list[torch.Tensor]): the outer list indicates test-time
-                augmentations and inner torch.Tensor should have a shape NxC,
-                which contains all points in the batch.
-            img_metas (list[list[dict]]): the outer list indicates test-time
-                augs (multiscale, flip, etc.) and the inner list indicates
-                images in a batch
-            img (list[torch.Tensor], optional): the outer
-                list indicates test-time augmentations and inner
-                torch.Tensor should have a shape NxCxHxW, which contains
-                all images in the batch. Defaults to None.
-        """
-        for var, name in [(img_inputs, 'img_inputs'),
-                          (img_metas, 'img_metas')]:
-            if not isinstance(var, list):
-                raise TypeError('{} must be a list, but got {}'.format(
-                    name, type(var)))
-
-        num_augs = len(img_inputs)
-        if num_augs != len(img_metas):
-            raise ValueError(
-                'num of augmentations ({}) != num of image meta ({})'.format(
-                    len(points), len(img_metas)))
-
-        if num_augs == 1:
-            img_inputs = [img_inputs] if img_inputs is None else img_inputs
-            return self.simple_test(points[0], img_metas[0], 
-                                    img_inputs[0], **kwargs)
-        else:
-            return self.aug_test(points, img_metas, img_inputs, **kwargs)
-        

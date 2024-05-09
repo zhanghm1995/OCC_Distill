@@ -9,7 +9,7 @@ import pyquaternion
 from nuscenes.utils.data_classes import Box as NuScenesBox
 
 from ..core import show_result
-from .openscene_occ_metrics import Metric_mIoU
+from .openscene_occ_metrics import Metric_mIoU, Metric_OccIoU
 from ..core.bbox import Box3DMode, Coord3DMode, LiDARInstance3DBoxes
 from .builder import DATASETS
 from .custom_3d import Custom3DDataset
@@ -142,7 +142,8 @@ class CustomNuPlanDataset(Custom3DDataset):
                  img_info_prototype='mmcv',
                  multi_adj_frame_id_cfg=None,
                  ego_cam='CAM_FRONT',
-                 stereo=False):
+                 stereo=False,
+                 pred_binary_occ=True):
         self.load_interval = load_interval
         self.use_valid_flag = use_valid_flag
         super().__init__(
@@ -172,6 +173,7 @@ class CustomNuPlanDataset(Custom3DDataset):
         self.multi_adj_frame_id_cfg = multi_adj_frame_id_cfg
         self.ego_cam = ego_cam
         self.stereo = stereo
+        self.pred_binary_occ = pred_binary_occ
 
     def get_cat_ids(self, idx):
         """Get category distribution of single scene.
@@ -519,11 +521,14 @@ class CustomNuPlanDataset(Custom3DDataset):
             dict[str, float]: Results of each evaluation metric.
         """
         from .pipelines.nuplan_loading import openscene_occ_to_voxel
-
-        self.occ_eval_metrics = Metric_mIoU(
-            num_classes=12,
-            use_lidar_mask=False,
-            use_image_mask=False)
+        
+        if not self.pred_binary_occ:
+            self.occ_eval_metrics = Metric_mIoU(
+                num_classes=12,
+                use_lidar_mask=False,
+                use_image_mask=False)
+        else:
+            self.occ_eval_metrics = Metric_OccIoU()
 
         print('\nStarting Evaluation...')
         for index, occ_pred in enumerate(tqdm(occ_results)):

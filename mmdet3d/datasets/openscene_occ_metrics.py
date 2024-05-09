@@ -186,15 +186,11 @@ class Metric_OccIoU():
         self.save_dir = save_dir
         self.use_lidar_mask = use_lidar_mask
         self.use_image_mask = use_image_mask
-        self.num_classes = 2
 
-        self.point_cloud_range = [-40.0, -40.0, -1.0, 40.0, 40.0, 5.4]
-        self.occupancy_size = [0.4, 0.4, 0.4]
-        self.voxel_size = 0.4
-        self.occ_xdim = int((self.point_cloud_range[3] - self.point_cloud_range[0]) / self.occupancy_size[0])
-        self.occ_ydim = int((self.point_cloud_range[4] - self.point_cloud_range[1]) / self.occupancy_size[1])
-        self.occ_zdim = int((self.point_cloud_range[5] - self.point_cloud_range[2]) / self.occupancy_size[2])
-        self.voxel_num = self.occ_xdim * self.occ_ydim * self.occ_zdim
+        assert not self.use_image_mask and not self.use_lidar_mask, \
+            'mask is not supported for openscene occupancy evaluation'
+
+        self.num_classes = 2
         self.hist = np.zeros((self.num_classes, self.num_classes))
         self.cnt = 0
 
@@ -240,25 +236,20 @@ class Metric_OccIoU():
         # print('===> mIoU: ' + str(round(np.nanmean(mIoUs) * 100, 2)))
         return round(np.nanmean(mIoUs) * 100, 2), hist
 
-
-    def add_batch(self, semantics_pred, semantics_gt, 
-                  mask_lidar, mask_camera,
+    def add_batch(self, 
+                  semantics_pred, 
+                  semantics_gt, 
+                  mask_lidar=None, 
+                  mask_camera=None,
                   already_is_binary_gt=False):
         self.cnt += 1
-        if self.use_image_mask:
-            masked_semantics_gt = semantics_gt[mask_camera]
-            masked_semantics_pred = semantics_pred[mask_camera]
-        elif self.use_lidar_mask:
-            masked_semantics_gt = semantics_gt[mask_lidar]
-            masked_semantics_pred = semantics_pred[mask_lidar]
-        else:
-            masked_semantics_gt = semantics_gt
-            masked_semantics_pred = semantics_pred
+        masked_semantics_gt = semantics_gt
+        masked_semantics_pred = semantics_pred
 
         occupancy_gt = masked_semantics_gt.copy()
         if not already_is_binary_gt:
             occupancy_gt = np.zeros_like(masked_semantics_gt)
-            occupancy_gt[masked_semantics_gt != 17] = 1
+            occupancy_gt[masked_semantics_gt != 11] = 1
         _, _hist = self.compute_mIoU(masked_semantics_pred, occupancy_gt, self.num_classes)
         self.hist += _hist
 
