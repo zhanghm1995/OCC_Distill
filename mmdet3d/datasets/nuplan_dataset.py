@@ -1,13 +1,15 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 import tempfile
 from os import path as osp
-
+from tqdm import tqdm
+import os
 import mmcv
 import numpy as np
 import pyquaternion
 from nuscenes.utils.data_classes import Box as NuScenesBox
 
 from ..core import show_result
+from .openscene_occ_metrics import Metric_mIoU
 from ..core.bbox import Box3DMode, Coord3DMode, LiDARInstance3DBoxes
 from .builder import DATASETS
 from .custom_3d import Custom3DDataset
@@ -490,14 +492,11 @@ class CustomNuPlanDataset(Custom3DDataset):
         return result_files, tmp_dir
 
     def evaluate(self,
-                 results,
-                 metric='bbox',
-                 logger=None,
-                 jsonfile_prefix=None,
-                 result_names=['pts_bbox'],
-                 show=False,
-                 out_dir=None,
-                 pipeline=None):
+                 occ_results,
+                 runner=None, 
+                 show_dir=None, 
+                 use_image_mask=False, 
+                 **eval_kwargs):
         """Evaluation in nuScenes protocol.
 
         Args:
@@ -519,23 +518,31 @@ class CustomNuPlanDataset(Custom3DDataset):
         Returns:
             dict[str, float]: Results of each evaluation metric.
         """
-        result_files, tmp_dir = self.format_results(results, jsonfile_prefix)
+        from .pipelines.nuplan_loading import openscene_occ_to_voxel
 
-        if isinstance(result_files, dict):
-            results_dict = dict()
-            for name in result_names:
-                print('Evaluating bboxes of {}'.format(name))
-                ret_dict = self._evaluate_single(result_files[name])
-            results_dict.update(ret_dict)
-        elif isinstance(result_files, str):
-            results_dict = self._evaluate_single(result_files)
+        self.occ_eval_metrics = Metric_mIoU(
+            num_classes=12,
+            use_lidar_mask=False,
+            use_image_mask=False)
 
-        if tmp_dir is not None:
-            tmp_dir.cleanup()
+        print('\nStarting Evaluation...')
+        for index, occ_pred in enumerate(tqdm(occ_results)):
+            info = self.data_infos[index]
 
-        if show or out_dir:
-            self.show(results, out_dir, show=show, pipeline=pipeline)
-        return results_dict
+            occ_gt_path = info['occ_gt_final_path']
+            occ_gts = np.load(occ_gt_path)  # (n, 2)
+
+            gt_semantics = openscene_occ_to_voxel(occ_gts).numpy()
+
+            self.occ_eval_metrics.add_batch(occ_pred, gt_semantics, None, None)
+
+            if index%100==0 and show_dir is not None:
+                gt_vis = self.vis_occ(gt_semantics)
+                pred_vis = self.vis_occ(occ_pred)
+                mmcv.imwrite(np.concatenate([gt_vis, pred_vis], axis=1),
+                             os.path.join(show_dir + "%d.jpg"%index))
+
+        return self.occ_eval_metrics.count_miou()
 
     def _build_default_pipeline(self):
         """Build the default pipeline for this dataset."""

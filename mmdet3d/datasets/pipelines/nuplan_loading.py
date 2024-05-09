@@ -530,7 +530,9 @@ def openscene_occ_to_voxel(occ_data,
                            point_cloud_range=[-50.0, -50.0, -4.0, 50.0, 50.0, 4.0], 
                            occupancy_size=[0.5, 0.5, 0.5],
                            occupancy_classes=11):
-
+    if isinstance(occ_data, np.ndarray):
+        occ_data = torch.from_numpy(occ_data)
+    
     occ_data = occ_data.long()
     occ_xdim = int((point_cloud_range[3] - point_cloud_range[0]) / occupancy_size[0])
     occ_ydim = int((point_cloud_range[4] - point_cloud_range[1]) / occupancy_size[1])
