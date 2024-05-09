@@ -190,20 +190,30 @@ train_pipeline = [
 ]
 
 test_pipeline = [
-    dict(type='PrepareImageInputs', data_config=data_config, sequential=True),
     dict(
-        type='LoadAnnotationsBEVDepth',
+        type='PrepareOpenSceneImageInputs',
+        is_train=False,
+        data_config=data_config,
+        sequential=True),
+    dict(
+        type='LoadOpenSceneAnnotationsBEVDepth',
         bda_aug_conf=bda_aug_conf,
         classes=class_names,
         is_train=False),
-    dict(
-        type='LoadPointsFromFile',
-        coord_type='LIDAR',
-        load_dim=5,
-        use_dim=[0,1,2,4],
-        file_client_args=file_client_args),
     dict(type='LoadNuPlanPointsFromFile',
          coord_type='LIDAR'),
+    dict(
+        type='LoadNuPlanPointsFromMultiSweeps',
+        sweeps_num=0,
+        use_dim=[0, 1, 2, 3],
+        file_client_args=file_client_args,
+        pad_empty_sweeps=True,
+        remove_close=True,
+        ego_mask=(-0.8, -1.5, 0.8, 2.5),
+        hard_sweeps_timestamp=0,
+        random_select=False,
+    ),
+    dict(type='PointsRangeFilter', point_cloud_range=point_cloud_range),
     dict(type='PointsConditionalFlip'),
     dict(
         type='MultiScaleFlipAug3D',
@@ -237,6 +247,7 @@ share_data_config = dict(
 )
 
 test_data_config = dict(
+    data_root=data_root,
     pipeline=test_pipeline,
     ann_file=val_ann_pickle_root)
 
