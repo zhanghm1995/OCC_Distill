@@ -45,9 +45,8 @@ class BEVFusionStereo4DOCCOpenScene(BEVFusionStereo4DOCC):
         if not self.pred_binary_occ:
             loss_occ = self.loss_occ(preds, voxel_semantics)
         else:
-            # predict binary occupancy, 0 is occupied, 1 is free
-            density_target = (voxel_semantics == 11).long()
-
+            # predict binary occupancy, 1 is occupied, 0 is free
+            density_target = (voxel_semantics != 11).long()
             loss_occ = self.loss_occ(preds, density_target)
         
         loss_['loss_occ'] = loss_occ
@@ -72,8 +71,10 @@ class BEVFusionStereo4DOCCOpenScene(BEVFusionStereo4DOCC):
             occ_res = occ_score.argmax(-1)
             occ_res = occ_res.squeeze(dim=0).cpu().numpy().astype(np.uint8)
         else:
-            density_score = occ_pred.softmax(-1)
-            no_empty_mask = density_score[..., 0] > density_score[..., 1]
+            # density_score = occ_pred.softmax(-1)
+            # no_empty_mask = density_score[..., 0] > density_score[..., 1]
+
+            no_empty_mask = occ_pred.argmax(-1)
             occ_res = no_empty_mask.squeeze(dim=0).cpu().numpy().astype(np.uint8)
         return [occ_res]
     
