@@ -13,7 +13,7 @@ import os.path as osp
 import numpy as np
 import torch
 import os, sys
-import tqdm
+from tqdm import tqdm
 
 
 def remove_data_wo_occ_path(split, 
@@ -52,8 +52,34 @@ def remove_data_wo_occ_path(split,
     with open(pkl_file_path, "wb") as f:
         pickle.dump(new_val_infos, f, protocol=pickle.HIGHEST_PROTOCOL)
 
+
+def preprocess_private_wm():
+    pkl_fp = "data/openscene-v1.1/meta_datas/private_test_wm/private_test_wm.pkl"
+    data_infos = mmengine.load(pkl_fp)
+    print(len(data_infos))
+
+    # modify the camera path to make it with absolute file path
+    data_root = "data/openscene-v1.1/sensor_blobs/private_test_wm"
+    for info in tqdm(data_infos):
+        for cam_type, cam_info in info['cams'].items():
+            cam_info['data_path'] = osp.join(data_root, cam_info['data_path'])
+        
+        # give a occupancy path for offline saving
+        log_name = info['log_name']
+        frame_idx = info['frame_idx']
+        occ_save_dir = osp.join("data/openscene-v1.0/", "occupancy/private", log_name)
+        occ_save_path = osp.join(occ_save_dir, f"{frame_idx:03d}_occ_final.npy")
+        info['occ_gt_final_path'] = occ_save_path
+        
+    print(len(data_infos))
+    pkl_file_path = f"data/openscene-v1.1/meta_datas/private_test_wm/private_test_wm_v2.pkl"
+    with open(pkl_file_path, "wb") as f:
+        pickle.dump(data_infos, f, protocol=pickle.HIGHEST_PROTOCOL)
     
+
 if __name__ == "__main__":
+    preprocess_private_wm()
+    exit()
     remove_data_wo_occ_path('train', 
                             need_update_occ_path=True, 
                             need_absolute_cam_path=True)

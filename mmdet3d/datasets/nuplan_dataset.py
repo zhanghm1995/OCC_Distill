@@ -143,9 +143,19 @@ class CustomNuPlanDataset(Custom3DDataset):
                  multi_adj_frame_id_cfg=None,
                  ego_cam='CAM_FRONT',
                  stereo=False,
-                 pred_binary_occ=False):
+                 pred_binary_occ=False,
+                 is_private_test=False):
         self.load_interval = load_interval
         self.use_valid_flag = use_valid_flag
+        if is_private_test:
+            import warnings
+            # give a warning
+            warnings.warn("The dataset is used for private testing")
+
+            # if used for private testing, we hard code the data_root and ann_file
+            data_root = "data/openscene-v1.1/sensor_blobs/private_test_wm"
+            ann_file = "data/openscene-v1.1/meta_datas/private_test_wm/private_test_wm_v2.pkl"
+        
         super().__init__(
             data_root=data_root,
             ann_file=ann_file,
@@ -456,7 +466,8 @@ class CustomNuPlanDataset(Custom3DDataset):
             info = self.data_infos[index]
 
             occ_gt_path = info['occ_gt_final_path']
-            save_path = occ_gt_path.replace('data/openscene-v1.0/', "results/openscene_binary/")
+            # save_path = occ_gt_path.replace('data/openscene-v1.0/', "results/openscene_binary_private/")
+            save_path = occ_gt_path.replace('data/openscene-v1.0/', "results/openscene_binary_val_e20/")
 
             save_dir = osp.split(save_path)[0]
             os.makedirs(save_dir, exist_ok=True)

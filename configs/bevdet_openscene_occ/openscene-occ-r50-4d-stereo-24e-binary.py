@@ -2,18 +2,18 @@
 Copyright (c) 2024 by Haiming Zhang. All Rights Reserved.
 
 Author: Haiming Zhang
-Date: 2024-05-09 17:03:24
+Date: 2024-05-12 00:22:58
 Email: haimingzhang@link.cuhk.edu.cn
-Description: Predict the binary occupancy.
+Description: 
 '''
 
-_base_ = ['./openscene-fusion-occ-r50-4d-stereo-24e.py']
+_base_ = ['./openscene-occ-r50-4d-stereo-24e.py']
 
 pred_binary_occ = True
 is_private_test = False
 
 model = dict(
-    type='BEVFusionStereo4DOCCOpenScene',
+    type='BEVStereo4DOCCOpenScene',
     num_classes=2,
     pred_binary_occ=pred_binary_occ,
 
@@ -27,8 +27,8 @@ model = dict(
 )
 
 data = dict(
-    samples_per_gpu=2,
-    workers_per_gpu=4,
+    samples_per_gpu=4,
+    workers_per_gpu=8,
     train=dict(
         pred_binary_occ=pred_binary_occ),
     val=dict(
