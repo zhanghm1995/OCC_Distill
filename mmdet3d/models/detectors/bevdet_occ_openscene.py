@@ -19,16 +19,27 @@ from einops import repeat, rearrange
 from .bevdet_occ import BEVStereo4DOCC, BEVFusionStereo4DOCC
 
 
+# openscene-nuscenes
+nusc_class_frequencies = np.array([124531392, 0, 0, 0, 68091, 271946, 19732177, 18440931, 
+    2131710, 941461, 1774002271, 24881000021])
+
 @DETECTORS.register_module()
 class BEVStereo4DOCCOpenScene(BEVStereo4DOCC):
     def __init__(self,
                  pred_binary_occ=False,
+                 balance_cls_weight=False,
                  **kwargs):
         super().__init__(**kwargs)
 
         self.pred_binary_occ = pred_binary_occ
 
         assert not self.use_mask, 'visibility mask is not supported for OpenScene dataset'
+
+        if balance_cls_weight:
+            class_weights = torch.from_numpy(1 / np.log(nusc_class_frequencies[:17] + 0.001)).float()
+            self.loss_occ = nn.CrossEntropyLoss(
+                    weight=class_weights, reduction="mean"
+                )
 
     def forward_train(self,
                       points=None,
