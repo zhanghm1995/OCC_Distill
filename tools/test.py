@@ -68,6 +68,11 @@ def parse_args():
         nargs='+',
         help='evaluation metrics, which depends on the dataset, e.g., "bbox",'
         ' "segm", "proposal" for COCO, and "mAP", "recall" for PASCAL VOC')
+    parser.add_argument(
+        '--save-root',
+        type=str,
+        default=None,
+        help='if not None, save the results after evaluation')
     parser.add_argument('--show', action='store_true', help='show results')
     parser.add_argument(
         '--show-dir', help='directory where results will be saved')
@@ -268,6 +273,9 @@ def main():
                 eval_kwargs.pop(key, None)
             eval_kwargs.update(dict(metric=args.eval, **kwargs))
             print(dataset.evaluate(outputs, **eval_kwargs))
+            
+            if args.save_root is not None:
+                dataset.format_results(outputs, save_root=args.save_root, **kwargs)
 
 
 if __name__ == '__main__':

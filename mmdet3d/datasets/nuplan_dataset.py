@@ -458,16 +458,21 @@ class CustomNuPlanDataset(Custom3DDataset):
         detail['{}/mAP'.format(metric_prefix)] = metrics['mean_ap']
         return detail
 
-    def format_results(self, occ_results, submission_prefix=None, **kwargs):
-        if submission_prefix is not None:
-            mmcv.mkdir_or_exist(submission_prefix)
+    def format_results(self, occ_results, save_root=None, **kwargs):
+        assert save_root is not None
 
         for index, occ_pred in enumerate(tqdm(occ_results)):
             info = self.data_infos[index]
 
             occ_gt_path = info['occ_gt_final_path']
+
+            save_path = occ_gt_path.replace('data/openscene-v1.0', save_root)
+
             # save_path = occ_gt_path.replace('data/openscene-v1.0/', "results/openscene_binary_private/")
-            save_path = occ_gt_path.replace('data/openscene-v1.0/', "results/openscene_binary_val_e20/")
+            # save_path = occ_gt_path.replace('data/openscene-v1.0/', "results/openscene_binary_val_e20/")
+            # save_path = occ_gt_path.replace('data/openscene-v1.0/', "results/openscene_vision_only_binary_val_e22/")
+            # save_path = occ_gt_path.replace('data/openscene-v1.0/', "results/openscene_vision_only_binary_private_e22/")
+            # save_path = occ_gt_path.replace('data/openscene-v1.0/', "results/openscene_vision_only_binary_e6/")  # iou=28.67 # 29.54 when epoch=12
 
             save_dir = osp.split(save_path)[0]
             os.makedirs(save_dir, exist_ok=True)

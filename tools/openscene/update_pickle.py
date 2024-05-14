@@ -14,6 +14,7 @@ import numpy as np
 import torch
 import os, sys
 from tqdm import tqdm
+from collections import defaultdict
 
 
 def remove_data_wo_occ_path(split, 
@@ -77,8 +78,47 @@ def preprocess_private_wm():
         pickle.dump(data_infos, f, protocol=pickle.HIGHEST_PROTOCOL)
     
 
+def create_partial_data():
+    """Create a partial data for accelerating training process.
+    """
+    pkl_fp = "data/openscene-v1.1/openscene_mini_train_v2.pkl"
+
+    data_infos = mmengine.load(pkl_fp)  # list type
+    print(f"original data length: {len(data_infos)}")
+    print(data_infos[0].keys())
+
+    # convert the list of dict to dict
+    data_infos_dict = defaultdict(list)
+    for d in data_infos:
+        data_infos_dict[d["scene_name"]].append(d)
+
+    data_infos_dict = dict(data_infos_dict)
+    print(f"scene numbers: {len(data_infos_dict)}")
+
+    num_frames_each_scene = [len(_scene) for _scene in data_infos_dict.values()]
+    print(min(num_frames_each_scene), max(num_frames_each_scene))
+
+    filtered_scene_names = []
+    for key, value in data_infos_dict.items():
+        # filter the scenes with less than 8 frames
+        if len(value) < 8:
+            continue
+        filtered_scene_names.append(key)
+
+    # only keep the first 1/4 for acceleration
+    partial_filtered_scene_names = filtered_scene_names[:len(filtered_scene_names) // 4]
+    partial_data_infos = []
+    for key in partial_filtered_scene_names:
+        partial_data_infos.extend(data_infos_dict[key])
+    print(f"partial data length: {len(partial_data_infos)}")
+
+    pkl_file_path = f"data/openscene-v1.1/openscene_mini_train_v2_partial.pkl"
+    with open(pkl_file_path, "wb") as f:
+        pickle.dump(partial_data_infos, f, protocol=pickle.HIGHEST_PROTOCOL)
+    
+
 if __name__ == "__main__":
-    preprocess_private_wm()
+    create_partial_data()
     exit()
     remove_data_wo_occ_path('train', 
                             need_update_occ_path=True, 
