@@ -126,6 +126,125 @@ class BEVStereo4DOCCOpenScene(BEVStereo4DOCC):
         return [occ_res]
     
 
+@DETECTORS.register_module()
+class BEVStereo4DOCCOpenSceneV2(BEVStereo4DOCCOpenScene):
+    def __init__(self,
+                 use_origin_testing=True,
+                 test_threshold=8.5,
+                 **kwargs):
+        super().__init__(**kwargs)
+
+        assert not self.use_predicter
+
+        self.use_origin_testing = use_origin_testing
+        self.test_threshold = test_threshold
+
+        self.final_conv = ConvModule(
+            self.img_view_transformer.out_channels,
+            self.out_dim,
+            kernel_size=3,
+            stride=1,
+            padding=1,
+            bias=True,
+            conv_cfg=dict(type='Conv3d'))
+        
+        # like renderocc to use geometric loss and semantic loss separately
+        self.density_mlp = nn.Sequential(
+                nn.Linear(self.out_dim, self.out_dim*2),
+                nn.Softplus(),
+                nn.Linear(self.out_dim*2, 2),
+                nn.Softplus(),
+            )
+
+        num_classes = self.num_classes
+        self.semantic_mlp = nn.Sequential(
+            nn.Linear(self.out_dim, self.out_dim*2),
+            nn.Softplus(),
+            nn.Linear(self.out_dim*2, num_classes-1),
+        )
+
+        class_weights = torch.from_numpy(1 / np.log(nusc_class_frequencies[:11] + 0.001)).float()
+        self.semantic_loss = nn.CrossEntropyLoss(
+                weight=class_weights, reduction="mean")
+    
+    def forward_train(self,
+                      points=None,
+                      img_metas=None,
+                      img_inputs=None,
+                      **kwargs):
+        """Forward training function.
+        """
+        img_feats, pts_feats, depth = self.extract_feat(
+            points, img=img_inputs, img_metas=img_metas, **kwargs)
+        gt_depth = kwargs['gt_depth']
+        losses = dict()
+        loss_depth = self.img_view_transformer.get_depth_loss(gt_depth, depth)
+        losses['loss_depth'] = loss_depth
+
+        voxel_feats = self.final_conv(img_feats[0]).permute(0, 4, 3, 2, 1) # bncdhw->bnwhdc
+        
+        # predict SDF
+        density_prob = self.density_mlp(voxel_feats)
+        semantic = self.semantic_mlp(voxel_feats)
+
+        voxel_semantics = kwargs['voxel_semantics']
+        loss_occ = self.loss_3d(voxel_semantics, density_prob, semantic)
+        losses.update(loss_occ)
+
+        return losses
+    
+    def loss_3d(self, voxel_semantics, density_prob, semantic):
+        voxel_semantics=voxel_semantics.long()
+     
+        voxel_semantics=voxel_semantics.reshape(-1)
+        density_prob=density_prob.reshape(-1, 2)
+        semantic = semantic.reshape(-1, self.num_classes-1)
+        density_target = (voxel_semantics==11).long()
+        semantic_mask = voxel_semantics!=11
+
+        # compute loss
+        loss_geo = self.loss_occ(density_prob, density_target)
+        loss_sem = self.semantic_loss(semantic[semantic_mask], 
+                                      voxel_semantics[semantic_mask].long())
+            
+        loss_ = dict()
+        loss_['loss_3d_geo'] = loss_geo
+        loss_['loss_3d_sem'] = loss_sem
+        return loss_
+    
+    def simple_test(self,
+                    points,
+                    img_metas,
+                    img=None,
+                    rescale=False,
+                    **kwargs):
+        """Test function without augmentaiton."""
+        img_feats, _, _ = self.extract_feat(
+            points, img=img, img_metas=img_metas, **kwargs)
+        voxel_feats = self.final_conv(img_feats[0]).permute(0, 4, 3, 2, 1)
+        
+        # predict SDF
+        density_prob = self.density_mlp(voxel_feats)
+        density = density_prob[...,0]
+        semantic = self.semantic_mlp(voxel_feats)
+
+        # SDF --> Occupancy
+        if self.use_origin_testing:
+            no_empty_mask = density > self.test_threshold
+        else:
+            density_score = density_prob.softmax(-1)
+            no_empty_mask = density_score[..., 0] > density_score[..., 1]
+        
+        semantic_res = semantic.argmax(-1)
+
+        B, H, W, Z, C = voxel_feats.shape
+        occ = torch.ones((B,H,W,Z), dtype=semantic_res.dtype).to(semantic_res.device)
+        occ = occ * (self.num_classes-1)
+        occ[no_empty_mask] = semantic_res[no_empty_mask]
+
+        occ = occ.squeeze(dim=0).cpu().numpy().astype(np.uint8)
+        return [occ]
+
 
 @DETECTORS.register_module()
 class BEVFusionStereo4DOCCOpenScene(BEVFusionStereo4DOCC):
