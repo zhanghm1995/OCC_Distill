@@ -15,9 +15,9 @@ from torch import nn
 import numpy as np
 from torch.nn import functional as F
 from einops import repeat, rearrange
-
+from mmdet3d.models.losses.lovasz_loss import Lovasz_loss
 from .bevdet_occ import BEVStereo4DOCC, BEVFusionStereo4DOCC
-
+from .bevdet_occ_ssc import SSCNet
 
 # openscene-nuscenes
 nusc_class_frequencies = np.array([124531392, 0, 0, 0, 68091, 271946, 19732177, 18440931, 
@@ -27,16 +27,30 @@ nusc_class_frequencies = np.array([124531392, 0, 0, 0, 68091, 271946, 19732177, 
 class BEVStereo4DOCCOpenScene(BEVStereo4DOCC):
     def __init__(self,
                  pred_binary_occ=False,
+                 use_lovasz_loss=False,
                  balance_cls_weight=False,
+                 use_sscnet=False,
                  **kwargs):
         super().__init__(**kwargs)
 
         self.pred_binary_occ = pred_binary_occ
 
+        if use_sscnet:
+            assert self.use_predicter
+            
+            self.final_conv = SSCNet(
+                self.img_view_transformer.out_channels,
+                [128, 128, 128, 128, 128],
+                self.out_dim)
+
+        self.use_lovasz_loss = use_lovasz_loss 
+        if use_lovasz_loss:
+            self.loss_lovasz = Lovasz_loss(255)
+
         assert not self.use_mask, 'visibility mask is not supported for OpenScene dataset'
 
         if balance_cls_weight:
-            class_weights = torch.from_numpy(1 / np.log(nusc_class_frequencies[:17] + 0.001)).float()
+            class_weights = torch.from_numpy(1 / np.log(nusc_class_frequencies[:12] + 0.001)).float()
             self.loss_occ = nn.CrossEntropyLoss(
                     weight=class_weights, reduction="mean"
                 )
@@ -75,6 +89,12 @@ class BEVStereo4DOCCOpenScene(BEVStereo4DOCC):
             # predict binary occupancy, 1 is occupied, 0 is free
             density_target = (voxel_semantics != 11).long()
             loss_occ = self.loss_occ(preds, density_target)
+        
+        if self.use_lovasz_loss:
+            loss_lovasz = self.loss_lovasz(F.softmax(preds, dim=1), 
+                                           voxel_semantics)
+            
+            loss_['loss_lovasz'] = loss_lovasz
         
         loss_['loss_occ'] = loss_occ
         return loss_
