@@ -29,11 +29,16 @@ class BEVStereo4DOCCOpenScene(BEVStereo4DOCC):
                  pred_binary_occ=False,
                  use_lovasz_loss=False,
                  balance_cls_weight=False,
+                 loss_occ_weight=1.0,
                  use_sscnet=False,
+                 use_loss_norm=False,
                  **kwargs):
         super().__init__(**kwargs)
 
         self.pred_binary_occ = pred_binary_occ
+        self.use_loss_norm = use_loss_norm
+
+        assert not self.use_mask, 'visibility mask is not supported for OpenScene dataset'
 
         if use_sscnet:
             assert self.use_predicter
@@ -47,7 +52,8 @@ class BEVStereo4DOCCOpenScene(BEVStereo4DOCC):
         if use_lovasz_loss:
             self.loss_lovasz = Lovasz_loss(11)
 
-        assert not self.use_mask, 'visibility mask is not supported for OpenScene dataset'
+        # we use this weight when we set balance_cls_weight to true
+        self.loss_occ_weight = loss_occ_weight  if balance_cls_weight else 1.0
 
         if balance_cls_weight:
             class_weights = torch.from_numpy(1 / np.log(nusc_class_frequencies[:12] + 0.001)).float()
@@ -75,6 +81,12 @@ class BEVStereo4DOCCOpenScene(BEVStereo4DOCC):
         voxel_semantics = kwargs['voxel_semantics']
         loss_occ = self.loss_single(voxel_semantics, occ_pred)
         losses.update(loss_occ)
+
+        # use the loss norm trick
+        if self.use_loss_norm:
+            for key, value in losses.items():
+                losses[key] = value / (value.detach() + 1e-5)
+        
         return losses
        
     def loss_single(self, voxel_semantics, preds):
@@ -96,7 +108,7 @@ class BEVStereo4DOCCOpenScene(BEVStereo4DOCC):
             
             loss_['loss_lovasz'] = loss_lovasz
         
-        loss_['loss_occ'] = loss_occ
+        loss_['loss_occ'] = self.loss_occ_weight * loss_occ
         return loss_
 
     def simple_test(self,
@@ -129,7 +141,7 @@ class BEVStereo4DOCCOpenScene(BEVStereo4DOCC):
 @DETECTORS.register_module()
 class BEVStereo4DOCCOpenSceneV2(BEVStereo4DOCCOpenScene):
     def __init__(self,
-                 use_origin_testing=True,
+                 use_origin_testing=False,
                  test_threshold=8.5,
                  **kwargs):
         super().__init__(**kwargs)
@@ -240,7 +252,7 @@ class BEVStereo4DOCCOpenSceneV2(BEVStereo4DOCCOpenScene):
             no_empty_mask = density > self.test_threshold
         else:
             density_score = density_prob.softmax(-1)
-            no_empty_mask = density_score[..., 0] > density_score[..., 1]
+            no_empty_mask = density_score[..., 0] + 0.4 > density_score[..., 1]
         
         semantic_res = semantic.argmax(-1)
 
