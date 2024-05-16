@@ -45,7 +45,7 @@ class BEVStereo4DOCCOpenScene(BEVStereo4DOCC):
 
         self.use_lovasz_loss = use_lovasz_loss 
         if use_lovasz_loss:
-            self.loss_lovasz = Lovasz_loss(255)
+            self.loss_lovasz = Lovasz_loss(11)
 
         assert not self.use_mask, 'visibility mask is not supported for OpenScene dataset'
 
@@ -206,8 +206,15 @@ class BEVStereo4DOCCOpenSceneV2(BEVStereo4DOCCOpenScene):
         loss_geo = self.loss_occ(density_prob, density_target)
         loss_sem = self.semantic_loss(semantic[semantic_mask], 
                                       voxel_semantics[semantic_mask].long())
-            
+        
         loss_ = dict()
+
+        if self.use_lovasz_loss:
+            loss_lovasz = self.loss_lovasz(F.softmax(semantic[semantic_mask], dim=1), 
+                                           voxel_semantics[semantic_mask])
+            
+            loss_['loss_lovasz'] = loss_lovasz
+        
         loss_['loss_3d_geo'] = loss_geo
         loss_['loss_3d_sem'] = loss_sem
         return loss_

@@ -118,11 +118,13 @@ def create_partial_data():
     
 
 if __name__ == "__main__":
-    create_partial_data()
-    exit()
     remove_data_wo_occ_path('train', 
                             need_update_occ_path=True, 
                             need_absolute_cam_path=True)
     remove_data_wo_occ_path('val', 
                             need_update_occ_path=True, 
                             need_absolute_cam_path=True)
+    
+    create_partial_data()
+    exit()
+    
