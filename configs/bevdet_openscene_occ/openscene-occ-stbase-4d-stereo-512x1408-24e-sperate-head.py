@@ -284,6 +284,6 @@ custom_hooks = [
     ),
 ]
 
-# load_from = "ckpts/bevdet-stbase-4d-stereo-512x1408-cbgs.pth"
-load_from = "work_dirs/openscene-occ-stbase-4d-stereo-512x1408-24e-binary/epoch_18.pth"
+load_from = "ckpts/bevdet-stbase-4d-stereo-512x1408-cbgs.pth"
+# load_from = "work_dirs/openscene-occ-stbase-4d-stereo-512x1408-24e-binary/epoch_18.pth"
 # fp16 = dict(loss_scale='dynamic')

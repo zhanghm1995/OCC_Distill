@@ -21,10 +21,13 @@ pip install torch-scatter -f https://data.pyg.org/whl/torch-1.10.0-cu113.html
 
 pip install yapf==0.40.1
 ```
-Then we need to compile this project.
+Then we need to compile this project and install DCN.
 ```bash
 cd OCC_Distill
 pip install -v -e .
+
+cd mmdet3d/ops_dcnv3
+bash make.sh
 ```
 
 ## Datasets
@@ -42,6 +45,7 @@ python tools/openscene/update_pickle.py
 
 ## Get Started
 ### Train
+Use 8 GPUs to train the openscene dataset.
 ```bash
-bash tools/dist_train.sh 
+bash tools/dist_train.sh configs/bevdet_openscene_occ/openscene-occ-r50-4d-stereo-24e.py 8
 ```
