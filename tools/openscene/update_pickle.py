@@ -12,23 +12,35 @@ import os
 import os.path as osp
 import numpy as np
 import torch
+import warnings
 import os, sys
 from tqdm import tqdm
 from collections import defaultdict
 
 
-def remove_data_wo_occ_path(split, 
+def check_data(data_name, split):
+    pkl_fp = f"data/openscene-v1.1/openscene_{data_name}_{split}.pkl"
+    print(pkl_fp)
+    meta = mmengine.load(pkl_fp)
+    print(type(meta), len(meta))
+
+
+def remove_data_wo_occ_path(data_type,
+                            split, 
                             need_update_occ_path=False,
                             need_absolute_cam_path=False):
     """Because the original data has some missing occ_gt_final_path, we need to remove them.
     """
-    pkl_fp = f"data/openscene-v1.1/openscene_mini_{split}.pkl"
+    pkl_fp = f"data/openscene-v1.1/openscene_{data_type}_{split}.pkl"
+    if not osp.exists(pkl_fp):
+        warnings.warn(f"{pkl_fp} not exists.")
+        return
     meta = mmengine.load(pkl_fp)
-    print("split:", split, type(meta), len(meta))
+    print(f"data_type:{data_type}, split:", split, type(meta), len(meta))
     
     if need_absolute_cam_path:
         # modify the camera path to make it with absolute file path
-        data_root = "data/openscene-v1.1/sensor_blobs/mini"
+        data_root = f"data/openscene-v1.1/sensor_blobs/{data_type}"
         for info in meta:
             for cam_type, cam_info in info['cams'].items():
                 cam_info['data_path'] = osp.join(data_root, cam_info['data_path'])
@@ -49,7 +61,7 @@ def remove_data_wo_occ_path(split,
         new_val_infos.append(info)
     print(len(new_val_infos))
 
-    pkl_file_path = f"data/openscene-v1.1/openscene_mini_{split}_v2.pkl"
+    pkl_file_path = f"data/openscene-v1.1/openscene_{data_type}_{split}_v2.pkl"
     with open(pkl_file_path, "wb") as f:
         pickle.dump(new_val_infos, f, protocol=pickle.HIGHEST_PROTOCOL)
 
@@ -118,6 +130,18 @@ def create_partial_data():
     
 
 if __name__ == "__main__":
+    # check_data('trainval', 'train')
+    # check_data('mini', 'train')
+    remove_data_wo_occ_path('trainval',
+                            'train', 
+                            need_update_occ_path=True, 
+                            need_absolute_cam_path=True)
+    # remove_data_wo_occ_path('trainval',
+    #                         'val', 
+    #                         need_update_occ_path=True, 
+    #                         need_absolute_cam_path=True)
+    
+    exit()
     remove_data_wo_occ_path('train', 
                             need_update_occ_path=True, 
                             need_absolute_cam_path=True)

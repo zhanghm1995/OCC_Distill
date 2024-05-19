@@ -18,10 +18,30 @@ def save_infos(files, split):
             infos.extend(pickle.load(f))
 
     with open(f'data/openscene-v1.1/openscene_{split}.pkl', 'wb') as f:
-        pickle.dump(infos, f)
+        pickle.dump(infos, f, protocol=pickle.HIGHEST_PROTOCOL)
 
 
-if __name__ == "__main__":
+def collect_trainval_split():
+    split = 'trainval'
+    paths = os.listdir(f'data/openscene-v1.1/meta_datas/{split}')
+    paths = [
+        os.path.join(f'data/openscene-v1.1/meta_datas/{split}', each)
+        for each in paths if each.endswith('.pkl')]
+    print(f'{split}:', len(paths))
+          
+    if split == 'test':
+        save_infos(paths, 'test')
+    else:
+        train_paths = paths[:int(len(paths) * 0.85)]
+        print(f"{split}_train: {len(train_paths)}")
+        save_infos(train_paths, f'{split}_train')
+
+        val_paths = paths[int(len(paths) * 0.85):]
+        print(f"{split}_val: {len(val_paths)}")
+        save_infos(val_paths, f'{split}_val')
+    
+
+def collect_mini_split():
     split = 'mini'
     
     # train split
@@ -46,4 +66,9 @@ if __name__ == "__main__":
         for each in val_paths]
     print('val:', len(val_paths))
     save_infos(val_paths, f'{split}_val')
+
+
+if __name__ == "__main__":
+    collect_trainval_split()
+
     print('Done!')
