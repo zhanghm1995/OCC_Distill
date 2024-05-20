@@ -24,7 +24,7 @@ def check_data_complete(data_name, split):
 
     data_root = f"data/openscene-v1.1/sensor_blobs/{data_name}"
 
-    meta = mmengine.load(pkl_fp)[:100]
+    meta = mmengine.load(pkl_fp)
     print(type(meta), len(meta))
 
     missed_scene_token = []
@@ -48,6 +48,20 @@ def check_data_complete(data_name, split):
             missed_scene_token.append(info['scene_token'])
             continue
 
+        # check camera image
+        cam_invalid = False
+        for cam_name, cam_info in info['cams'].items():
+            if not osp.exists(cam_info['data_path']):
+                print(f"Camera Image File not exists: {cam_info['data_path']}")
+                print(info['scene_token'], info['token'], idx)
+                missed_scene_token.append(info['scene_token'])
+                cam_invalid = True
+                break
+        if cam_invalid:
+            missed_scene_token.append(info['scene_token'])
+            continue
+
+
     # convert to set
     missed_scene_token = set(missed_scene_token)
     print(f"Missed scene token: {missed_scene_token}, {len(missed_scene_token)}")
@@ -60,6 +74,11 @@ def check_data_complete(data_name, split):
 
     print(len(meta), len(kept_data_infos))
 
+    save_pkl_fp = f"data/openscene-v1.1/openscene_{data_name}_{split}_v2_valid.pkl"
+    with open(save_pkl_fp, "wb") as f:
+        pickle.dump(kept_data_infos, f, protocol=pickle.HIGHEST_PROTOCOL)
+
 
 if __name__ == "__main__":
-    check_data_complete('mini', 'train')
+    # check_data_complete('mini', 'train')
+    check_data_complete('trainval', 'train')
