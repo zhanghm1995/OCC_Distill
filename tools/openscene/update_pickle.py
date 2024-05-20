@@ -90,6 +90,18 @@ def preprocess_private_wm():
         pickle.dump(data_infos, f, protocol=pickle.HIGHEST_PROTOCOL)
     
 
+def get_scene_list(data_infos, scene_flag="scene_name"):
+    # convert the list of dict to dict
+    data_infos_dict = defaultdict(list)
+    for d in data_infos:
+        data_infos_dict[d[scene_flag]].append(d)
+
+    data_infos_dict = dict(data_infos_dict)
+    print(f"scene numbers: {len(data_infos_dict)}")
+
+    return data_infos_dict
+
+
 def create_partial_data():
     """Create a partial data for accelerating training process.
     """
