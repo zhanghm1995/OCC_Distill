@@ -50,7 +50,7 @@ class BEVStereo4DOCCOpenScene(BEVStereo4DOCC):
 
         self.use_lovasz_loss = use_lovasz_loss 
         if use_lovasz_loss:
-            self.loss_lovasz = Lovasz_loss(11)
+            self.loss_lovasz = Lovasz_loss(255)
 
         # we use this weight when we set balance_cls_weight to true
         self.loss_occ_weight = loss_occ_weight  if balance_cls_weight else 1.0
@@ -130,10 +130,10 @@ class BEVStereo4DOCCOpenScene(BEVStereo4DOCC):
             occ_res = occ_score.argmax(-1)
             occ_res = occ_res.squeeze(dim=0).cpu().numpy().astype(np.uint8)
         else:
-            # density_score = occ_pred.softmax(-1)
-            # no_empty_mask = density_score[..., 0] > density_score[..., 1]
+            density_score = occ_pred.softmax(-1)
+            no_empty_mask = density_score[..., 0] < density_score[..., 1] + 0.4
 
-            no_empty_mask = occ_pred.argmax(-1)
+            # no_empty_mask = occ_pred.argmax(-1)
             occ_res = no_empty_mask.squeeze(dim=0).cpu().numpy().astype(np.uint8)
         return [occ_res]
     
