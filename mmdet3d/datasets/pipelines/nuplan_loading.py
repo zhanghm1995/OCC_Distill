@@ -12,6 +12,7 @@ from io import BytesIO
 from typing import IO, Any, List, NamedTuple
 import copy
 from pyquaternion import Quaternion
+import os
 import mmcv
 from mmdet3d.core.points import BasePoints, get_points_type
 from ..builder import PIPELINES
@@ -195,9 +196,11 @@ class LoadNuPlanPointsFromFile(object):
     """Load NuPlan points from file.
     """
     def __init__(self,
-                 coord_type):
+                 coord_type,
+                 use_dim=-1):
         assert coord_type in ['LIDAR']
         self.coord_type = coord_type
+        self.use_dim = use_dim
 
     def _load_points(self, pts_filename):
         """Private function to load point clouds data.
@@ -208,7 +211,12 @@ class LoadNuPlanPointsFromFile(object):
         Returns:
             np.ndarray: An array containing point clouds data.
         """
-        pc = PointCloud.parse_from_file(pts_filename).to_pcd_bin2().T
+        if pts_filename.endswith('.npz'):
+            pc = np.load(pts_filename)['arr_0']
+        elif pts_filename.endswith('.pcd'):
+            pc = PointCloud.parse_from_file(pts_filename).to_pcd_bin2().T
+        else:
+            raise NotImplementedError
         return pc
 
     def __call__(self, results):
@@ -224,7 +232,19 @@ class LoadNuPlanPointsFromFile(object):
                 - points (:obj:`BasePoints`): Point clouds data.
         """
         pts_filename = results['pts_filename']
+        # origin_data_root = "data/openscene-v1.1/sensor_blobs/mini"
+        # pts_filename = pts_filename.replace(origin_data_root, "")
+        # pts_filename = pts_filename[1:] if pts_filename.startswith("/") else pts_filename
+        # pts_filename = os.path.join("/mnt/data2/zhanghm/Code/Occupancy/ViDAR/results/vidar_pred_pc", 
+        #                             pts_filename + ".npz")
+
         points = self._load_points(pts_filename)
+        if points.shape[1] <= 3:
+            points = np.concatenate([points, np.zeros((points.shape[0], 6 - points.shape[1]))], axis=1)
+
+        if self.use_dim != -1:
+            assert isinstance(self.use_dim, list)
+            points = points[:, self.use_dim]
 
         points_class = get_points_type(self.coord_type)
         points = points_class(

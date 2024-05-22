@@ -20,7 +20,7 @@ data_config = {
     ],
     'Ncams':
     8,
-    'input_size': (512, 1408),
+    'input_size': (704, 1600),
     'src_size': (1080, 1920),
 
     # Augmentation
@@ -44,7 +44,7 @@ voxel_size = [0.25, 0.25, 8]
 
 numC_Trans = 32
 
-multi_adj_frame_id_cfg = (1, 1+3, 1)
+multi_adj_frame_id_cfg = (1, 1+1, 1)
 
 model = dict(
     type='BEVStereo4DOCCOpenScene',
@@ -129,7 +129,7 @@ model = dict(
 
 # Data
 dataset_type = 'CustomNuPlanDataset'
-data_split = 'trainval'
+data_split = 'mini'
 data_root = f'data/openscene-v1.1/sensor_blobs/{data_split}'
 train_ann_pickle_root = f'data/openscene-v1.1/openscene_{data_split}_train_v2.pkl'
 val_ann_pickle_root = f'data/openscene-v1.1/openscene_{data_split}_val_v2.pkl'

@@ -111,7 +111,7 @@ model = dict(
         max_voxels=(30000, 40000)),
     pts_voxel_encoder=dict(
         type='HardVFE',
-        in_channels=4,
+        in_channels=3,  # the point cloud feature dimension
         feat_channels=[64, 64],
         with_distance=False,
         voxel_size=voxel_size,
@@ -168,18 +168,19 @@ train_pipeline = [
         classes=class_names,
         is_train=True),
     dict(type='LoadNuPlanPointsFromFile',
-         coord_type='LIDAR'),
-    dict(
-        type='LoadNuPlanPointsFromMultiSweeps',
-        sweeps_num=0,
-        use_dim=[0, 1, 2, 3],
-        file_client_args=file_client_args,
-        pad_empty_sweeps=True,
-        remove_close=True,
-        ego_mask=(-0.8, -1.5, 0.8, 2.5),
-        hard_sweeps_timestamp=0,
-        random_select=False,
-    ),
+         coord_type='LIDAR',
+         use_dim=[0, 1, 2]),
+    # dict(
+    #     type='LoadNuPlanPointsFromMultiSweeps',
+    #     sweeps_num=0,
+    #     use_dim=[0, 1, 2, 3],
+    #     file_client_args=file_client_args,
+    #     pad_empty_sweeps=True,
+    #     remove_close=True,
+    #     ego_mask=(-0.8, -1.5, 0.8, 2.5),
+    #     hard_sweeps_timestamp=0,
+    #     random_select=False,
+    # ),
     dict(type='OpenScenePointToMultiViewDepth', downsample=1, grid_config=grid_config),
     dict(type='PointsRangeFilter', point_cloud_range=point_cloud_range),
     dict(type='PointsConditionalFlip'),
@@ -201,18 +202,19 @@ test_pipeline = [
         classes=class_names,
         is_train=False),
     dict(type='LoadNuPlanPointsFromFile',
-         coord_type='LIDAR'),
-    dict(
-        type='LoadNuPlanPointsFromMultiSweeps',
-        sweeps_num=0,
-        use_dim=[0, 1, 2, 3],
-        file_client_args=file_client_args,
-        pad_empty_sweeps=True,
-        remove_close=True,
-        ego_mask=(-0.8, -1.5, 0.8, 2.5),
-        hard_sweeps_timestamp=0,
-        random_select=False,
-    ),
+         coord_type='LIDAR',
+         use_dim=[0, 1, 2]),
+    # dict(
+    #     type='LoadNuPlanPointsFromMultiSweeps',
+    #     sweeps_num=0,
+    #     use_dim=[0, 1, 2],
+    #     file_client_args=file_client_args,
+    #     pad_empty_sweeps=True,
+    #     remove_close=True,
+    #     ego_mask=(-0.8, -1.5, 0.8, 2.5),
+    #     hard_sweeps_timestamp=0,
+    #     random_select=False,
+    # ),
     dict(type='PointsRangeFilter', point_cloud_range=point_cloud_range),
     dict(type='PointsConditionalFlip'),
     dict(
@@ -274,14 +276,14 @@ for key in ['val', 'train', 'test']:
 optimizer = dict(type='AdamW', lr=1e-4, weight_decay=1e-2)
 optimizer_config = dict(grad_clip=dict(max_norm=5, norm_type=2))
 
-## zhm: the original lr_config is as follows:
 lr_config = dict(
     policy='step',
     warmup='linear',
     warmup_iters=200,
     warmup_ratio=0.001,
-    step=[100,])
+    step=[20,])
 runner = dict(type='EpochBasedRunner', max_epochs=24)
+checkpoint_config = dict(interval=1, max_keep_ckpts=10)
 
 custom_hooks = [
     dict(
@@ -291,5 +293,5 @@ custom_hooks = [
     ),
 ]
 
-# load_from="bevdet-r50-4d-stereo-cbgs.pth"
+load_from = "ckpts/bevdet-r50-4d-stereo-cbgs.pth"
 # fp16 = dict(loss_scale='dynamic')
