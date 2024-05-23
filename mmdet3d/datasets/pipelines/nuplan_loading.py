@@ -197,10 +197,16 @@ class LoadNuPlanPointsFromFile(object):
     """
     def __init__(self,
                  coord_type,
+                 use_pred_pc=False,
+                 pred_pc_data_root=None,
                  use_dim=-1):
         assert coord_type in ['LIDAR']
         self.coord_type = coord_type
         self.use_dim = use_dim
+        self.use_pred_pc = use_pred_pc # whether use the predicted point cloud
+        if use_pred_pc:
+            assert pred_pc_data_root is not None, "Please specify the predicted point cloud data root."
+            self.pred_pc_data_root = pred_pc_data_root
 
     def _load_points(self, pts_filename):
         """Private function to load point clouds data.
@@ -232,11 +238,12 @@ class LoadNuPlanPointsFromFile(object):
                 - points (:obj:`BasePoints`): Point clouds data.
         """
         pts_filename = results['pts_filename']
-        # origin_data_root = "data/openscene-v1.1/sensor_blobs/mini"
-        # pts_filename = pts_filename.replace(origin_data_root, "")
-        # pts_filename = pts_filename[1:] if pts_filename.startswith("/") else pts_filename
-        # pts_filename = os.path.join("/mnt/data2/zhanghm/Code/Occupancy/ViDAR/results/vidar_pred_pc", 
-        #                             pts_filename + ".npz")
+        
+        if self.use_pred_pc:
+            origin_data_root = "data/openscene-v1.1/sensor_blobs/mini"
+            pts_filename = pts_filename.replace(origin_data_root, "")
+            pts_filename = pts_filename[1:] if pts_filename.startswith("/") else pts_filename
+            pts_filename = os.path.join(self.pred_pc_data_root, pts_filename + ".npz")
 
         points = self._load_points(pts_filename)
         if points.shape[1] <= 3:

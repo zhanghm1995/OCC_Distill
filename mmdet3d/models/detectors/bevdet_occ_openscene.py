@@ -275,12 +275,24 @@ class BEVFusionStereo4DOCCOpenScene(BEVFusionStereo4DOCC):
 
     def __init__(self,
                  pred_binary_occ=False,
+                 use_lovasz_loss=False,
+                 balance_cls_weight=False,
                  **kwargs):
         super(BEVFusionStereo4DOCCOpenScene, self).__init__(**kwargs)
 
         self.pred_binary_occ = pred_binary_occ
 
         assert not self.use_mask, 'visibility mask is not supported for OpenScene dataset'
+
+        self.use_lovasz_loss = use_lovasz_loss 
+        if use_lovasz_loss:
+            self.loss_lovasz = Lovasz_loss(255)
+
+        if balance_cls_weight:
+            class_weights = torch.from_numpy(1 / np.log(nusc_class_frequencies[:12] + 0.001)).float()
+            self.loss_occ = nn.CrossEntropyLoss(
+                    weight=class_weights, reduction="mean"
+                )
         
     def loss_single(self, voxel_semantics, preds):
         loss_ = dict()
@@ -294,6 +306,12 @@ class BEVFusionStereo4DOCCOpenScene(BEVFusionStereo4DOCC):
             # predict binary occupancy, 1 is occupied, 0 is free
             density_target = (voxel_semantics != 11).long()
             loss_occ = self.loss_occ(preds, density_target)
+
+        if self.use_lovasz_loss:
+            loss_lovasz = self.loss_lovasz(F.softmax(preds, dim=1), 
+                                           voxel_semantics)
+            
+            loss_['loss_lovasz'] = loss_lovasz
         
         loss_['loss_occ'] = loss_occ
         return loss_
