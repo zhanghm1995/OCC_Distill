@@ -18,6 +18,7 @@ from einops import repeat, rearrange
 from mmdet3d.models.losses.lovasz_loss import Lovasz_loss
 from .bevdet_occ import BEVStereo4DOCC, BEVFusionStereo4DOCC
 from .bevdet_occ_ssc import SSCNet
+from .. import builder
 
 # openscene-nuscenes
 nusc_class_frequencies = np.array([124531392, 0, 0, 0, 68091, 271946, 19732177, 18440931, 
@@ -31,6 +32,8 @@ class BEVStereo4DOCCOpenScene(BEVStereo4DOCC):
                  balance_cls_weight=False,
                  loss_occ_weight=1.0,
                  use_sscnet=False,
+                 use_sdb=False,
+                 final_conv_cfg=None,
                  use_loss_norm=False,
                  **kwargs):
         super().__init__(**kwargs)
@@ -47,6 +50,8 @@ class BEVStereo4DOCCOpenScene(BEVStereo4DOCC):
                 self.img_view_transformer.out_channels,
                 [128, 128, 128, 128, 128],
                 self.out_dim)
+        elif use_sdb:
+            self.final_conv = builder.build_middle_encoder(final_conv_cfg)
 
         self.use_lovasz_loss = use_lovasz_loss 
         if use_lovasz_loss:
@@ -277,6 +282,7 @@ class BEVFusionStereo4DOCCOpenScene(BEVFusionStereo4DOCC):
                  pred_binary_occ=False,
                  use_lovasz_loss=False,
                  balance_cls_weight=False,
+                 loss_occ_weight=1.0,
                  **kwargs):
         super(BEVFusionStereo4DOCCOpenScene, self).__init__(**kwargs)
 
@@ -287,6 +293,9 @@ class BEVFusionStereo4DOCCOpenScene(BEVFusionStereo4DOCC):
         self.use_lovasz_loss = use_lovasz_loss 
         if use_lovasz_loss:
             self.loss_lovasz = Lovasz_loss(255)
+
+        # we use this weight when we set balance_cls_weight to true
+        self.loss_occ_weight = loss_occ_weight  if balance_cls_weight else 1.0
 
         if balance_cls_weight:
             class_weights = torch.from_numpy(1 / np.log(nusc_class_frequencies[:12] + 0.001)).float()
@@ -313,7 +322,7 @@ class BEVFusionStereo4DOCCOpenScene(BEVFusionStereo4DOCC):
             
             loss_['loss_lovasz'] = loss_lovasz
         
-        loss_['loss_occ'] = loss_occ
+        loss_['loss_occ'] = self.loss_occ_weight * loss_occ
         return loss_
 
     def simple_test(self,
