@@ -66,8 +66,14 @@ def remove_data_wo_occ_path(data_type,
         pickle.dump(new_val_infos, f, protocol=pickle.HIGHEST_PROTOCOL)
 
 
-def preprocess_private_wm():
+def preprocess_private_wm(is_virtual_test=False):
+    """Update the relative camera path to absolute path, and assign the 
+    occupancy path for data saving.
+    """
     pkl_fp = "data/openscene-v1.1/meta_datas/private_test_wm/private_test_wm.pkl"
+    base_path = osp.splitext(pkl_fp)[0]
+    if is_virtual_test:
+        pkl_fp = base_path + "_virtual.pkl"
     data_infos = mmengine.load(pkl_fp)
     print(len(data_infos))
 
@@ -85,7 +91,9 @@ def preprocess_private_wm():
         info['occ_gt_final_path'] = occ_save_path
         
     print(len(data_infos))
-    pkl_file_path = f"data/openscene-v1.1/meta_datas/private_test_wm/private_test_wm_v2.pkl"
+    # save the new pickle file
+    base_path = osp.splitext(pkl_fp)[0]
+    pkl_file_path = base_path + "_v2.pkl"
     with open(pkl_file_path, "wb") as f:
         pickle.dump(data_infos, f, protocol=pickle.HIGHEST_PROTOCOL)
     
@@ -142,6 +150,9 @@ def create_partial_data():
     
 
 if __name__ == "__main__":
+    preprocess_private_wm(is_virtual_test=True)
+    exit()
+
     # check_data('trainval', 'train')
     # check_data('mini', 'train')
     remove_data_wo_occ_path('trainval',

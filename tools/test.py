@@ -17,6 +17,7 @@ from mmdet3d.datasets import build_dataloader, build_dataset
 from mmdet3d.models import build_model
 from mmdet.apis import multi_gpu_test, set_random_seed
 from mmdet.datasets import replace_ImageToTensor
+from copy import deepcopy
 
 if mmdet.__version__ > '2.23.0':
     # If mmdet version > 2.23.0, setup_multi_processes would be imported and
@@ -272,7 +273,7 @@ def main():
             ]:
                 eval_kwargs.pop(key, None)
             eval_kwargs.update(dict(metric=args.eval, **kwargs))
-            print(dataset.evaluate(outputs, **eval_kwargs))
+            print(dataset.evaluate(deepcopy(outputs), **eval_kwargs))
             
             if args.save_root is not None:
                 dataset.format_results(outputs, save_root=args.save_root, **kwargs)

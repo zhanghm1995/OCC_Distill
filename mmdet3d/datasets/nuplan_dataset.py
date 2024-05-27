@@ -468,12 +468,6 @@ class CustomNuPlanDataset(Custom3DDataset):
 
             save_path = occ_gt_path.replace('data/openscene-v1.0', save_root)
 
-            # save_path = occ_gt_path.replace('data/openscene-v1.0/', "results/openscene_binary_private/")
-            # save_path = occ_gt_path.replace('data/openscene-v1.0/', "results/openscene_binary_val_e20/")
-            # save_path = occ_gt_path.replace('data/openscene-v1.0/', "results/openscene_vision_only_binary_val_e22/")
-            # save_path = occ_gt_path.replace('data/openscene-v1.0/', "results/openscene_vision_only_binary_private_e22/")
-            # save_path = occ_gt_path.replace('data/openscene-v1.0/', "results/openscene_vision_only_binary_e6/")  # iou=28.67 # 29.54 when epoch=12
-
             save_dir = osp.split(save_path)[0]
             os.makedirs(save_dir, exist_ok=True)
 

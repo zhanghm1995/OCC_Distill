@@ -155,6 +155,16 @@ class CustomFPN(BaseModule):
         """Forward function."""
         assert len(inputs) == len(self.in_channels)
 
+        # Adapting for VOV backbones which has string keys
+        if isinstance(inputs, dict):
+            keys_list = list(inputs.keys())
+            inputs_new = {}
+            # Convert string keys of inputs to numerals
+            for i, v in enumerate(inputs.values()):
+                inputs_new[i] = v
+            del inputs
+            inputs = inputs_new
+
         # build laterals
         laterals = [
             lateral_conv(inputs[i + self.start_level])
