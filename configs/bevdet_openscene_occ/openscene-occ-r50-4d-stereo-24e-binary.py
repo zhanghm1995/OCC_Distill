@@ -16,6 +16,8 @@ model = dict(
     type='BEVStereo4DOCCOpenScene',
     num_classes=2,
     pred_binary_occ=pred_binary_occ,
+    balance_cls_weight=False,
+    use_dice_loss=True,
 
     # loss_occ=dict(
     #     type='FocalLoss',
@@ -29,11 +31,14 @@ model = dict(
         class_weight=[0.2, 0.8],
         use_sigmoid=False,
         loss_weight=1.0),
+    # loss_occ=dict(
+    #     type='CustomDiceLoss',
+    #     mode='multilabel')
 )
 
 data = dict(
-    samples_per_gpu=4,
-    workers_per_gpu=8,
+    samples_per_gpu=2,
+    workers_per_gpu=6,
     train=dict(
         pred_binary_occ=pred_binary_occ),
     val=dict(
@@ -44,5 +49,5 @@ data = dict(
 )
 
 
-# load_from = "ckpts/bevdet-r50-4d-stereo-cbgs.pth"
-load_from = "work_dirs/openscene-occ-r50-4d-stereo-24e-binary/epoch_22_ema.pth"
+load_from = "ckpts/bevdet-r50-4d-stereo-cbgs.pth"
+# load_from = "work_dirs/openscene-occ-r50-4d-stereo-24e-binary/epoch_22_ema.pth"

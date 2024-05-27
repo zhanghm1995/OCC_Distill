@@ -16,6 +16,7 @@ import numpy as np
 from torch.nn import functional as F
 from einops import repeat, rearrange
 from mmdet3d.models.losses.lovasz_loss import Lovasz_loss
+from mmdet3d.models.losses.dice_loss import CustomDiceLoss
 from mmdet.models.builder import build_loss
 from .bevdet_occ import BEVStereo4DOCC, BEVFusionStereo4DOCC
 from .bevdet import BEVDepth4D
@@ -169,6 +170,7 @@ class BEVStereo4DOCCOpenScene(BEVStereo4DOCC):
     def __init__(self,
                  pred_binary_occ=False,
                  use_lovasz_loss=False,
+                 use_dice_loss=False,
                  balance_cls_weight=False,
                  loss_occ_weight=1.0,
                  use_sscnet=False,
@@ -196,6 +198,9 @@ class BEVStereo4DOCCOpenScene(BEVStereo4DOCC):
         self.use_lovasz_loss = use_lovasz_loss 
         if use_lovasz_loss:
             self.loss_lovasz = Lovasz_loss(255)
+        if use_dice_loss:
+            assert pred_binary_occ, 'Now Dice loss is only used for binary occupancy prediction'
+            self.locc_cc = CustomDiceLoss(mode='multiclass')
 
         # we use this weight when we set balance_cls_weight to true
         self.loss_occ_weight = loss_occ_weight  if balance_cls_weight else 1.0

@@ -113,7 +113,7 @@ model = dict(
 dataset_type = 'CustomNuPlanDataset'
 data_split = 'mini'
 data_root = f'data/openscene-v1.1/sensor_blobs/{data_split}'
-train_ann_pickle_root = f'data/openscene-v1.1/openscene_{data_split}_train_v2.pkl'
+train_ann_pickle_root = f'data/openscene-v1.1/openscene_{data_split}_train_v2_partial.pkl'
 val_ann_pickle_root = f'data/openscene-v1.1/openscene_{data_split}_val_v2.pkl'
 file_client_args = dict(backend='disk')
 
@@ -256,6 +256,10 @@ custom_hooks = [
         init_updates=10560,
         priority='NORMAL',
     ),
+    dict(
+        type='SyncbnControlHook',
+        syncbn_start_epoch=0,
+    )
 ]
 
 load_from = "ckpts/bevdet-r50-4d-stereo-cbgs.pth"
