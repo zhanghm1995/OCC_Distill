@@ -161,6 +161,88 @@ class BEVStereo4DOCC(BEVStereo4D):
         losses.update(loss_occ)
         return losses
     
+    def aug_test(self, 
+                 points,
+                 img_metas,
+                 img=None,
+                 rescale=False,
+                 **kwargs):
+        """Test function with augmentaiton."""
+        points = [None] * len(img) if points is None else points
+        img_feats, _, _ = multi_apply(self.extract_feat, 
+                                      points, 
+                                      img,
+                                      img_metas, 
+                                      **kwargs)
+        
+        ## NOTE: here we assume only use the flip augmentation
+        occ_res = self.aug_test_imgs(img_feats, img_metas, 
+                                     rescale,
+                                     **kwargs)
+        return [occ_res]
+
+    def aug_test_imgs(self,
+                      feats,
+                      img_metas,
+                      rescale=False,
+                      **kwargs):
+        """Test function of image branch with augmentaiton."""
+        # only support aug_test for one sample
+        aug_occs = []
+        idx = -1
+        for x, img_meta in zip(feats, img_metas):
+            idx += 1
+            occ_pred = self.final_conv(x[0]).permute(0, 4, 3, 2, 1)
+            if self.use_predicter:
+                occ_pred = self.predicter(occ_pred)
+            occ_score = occ_pred.softmax(-1)  # to (1, 200, 200, 16, 18)
+            if kwargs['flip_dx'][idx][0]:
+                occ_score = occ_score.flip(dims=[1])
+            if kwargs['flip_dy'][idx][0]:
+                occ_score = occ_score.flip(dims=[2])
+
+            aug_occs.append(occ_score)
+
+        merged_occs = merge_aug_occs(aug_occs)
+        return merged_occs
+    
+    def forward_test(self,
+                     points=None,
+                     img_metas=None,
+                     img_inputs=None,
+                     **kwargs):
+        """
+        Args:
+            points (list[torch.Tensor]): the outer list indicates test-time
+                augmentations and inner torch.Tensor should have a shape NxC,
+                which contains all points in the batch.
+            img_metas (list[list[dict]]): the outer list indicates test-time
+                augs (multiscale, flip, etc.) and the inner list indicates
+                images in a batch
+            img (list[torch.Tensor], optional): the outer
+                list indicates test-time augmentations and inner
+                torch.Tensor should have a shape NxCxHxW, which contains
+                all images in the batch. Defaults to None.
+        """
+        for var, name in [(img_inputs, 'img_inputs'),
+                          (img_metas, 'img_metas')]:
+            if not isinstance(var, list):
+                raise TypeError('{} must be a list, but got {}'.format(
+                    name, type(var)))
+
+        num_augs = len(img_inputs)
+        if num_augs != len(img_metas):
+            raise ValueError(
+                'num of augmentations ({}) != num of image meta ({})'.format(
+                    len(points), len(img_metas)))
+
+        if num_augs == 1:
+            img_inputs = [img_inputs] if img_inputs is None else img_inputs
+            return self.simple_test(points[0], img_metas[0], 
+                                    img_inputs[0], **kwargs)
+        else:
+            return self.aug_test(points, img_metas, img_inputs, **kwargs)
+        
     def get_intermediate_features(self, points, img_inputs, img_metas, 
                                   return_loss=False, 
                                   logits_as_prob_feat=False,

@@ -20,7 +20,7 @@ data_config = {
     ],
     'Ncams':
     8,
-    'input_size': (704, 1600),
+    'input_size': (512, 1408),
     'src_size': (1080, 1920),
 
     # Augmentation

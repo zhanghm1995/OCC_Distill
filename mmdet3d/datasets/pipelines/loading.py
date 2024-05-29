@@ -1178,6 +1178,7 @@ class PrepareImageInputs(object):
         to_float32 (bool): Whether to convert the img to float32.
             Defaults to False.
         color_type (str): Color type of the file. Defaults to 'unchanged'.
+        use_tta (bool): whether use TTA strategy when testing.
     """
 
     def __init__(
@@ -1185,11 +1186,13 @@ class PrepareImageInputs(object):
         data_config,
         is_train=False,
         sequential=False,
+        use_tta=False
     ):
         self.is_train = is_train
         self.data_config = data_config
         self.normalize_img = mmlabNormalize
         self.sequential = sequential
+        self.use_tta = use_tta
 
     def get_rot(self, h):
         return torch.Tensor([
@@ -1374,7 +1377,15 @@ class PrepareImageInputs(object):
         return (imgs, sensor2egos, ego2globals, intrins, post_rots, post_trans)
 
     def __call__(self, results):
-        results['img_inputs'] = self.get_inputs(results)
+        if self.use_tta:
+            flip = results['img_flip']
+            scale = results['scale'][0]
+        else:
+            flip = None
+            scale = None
+        
+        results['img_inputs'] = self.get_inputs(
+            results, flip=flip, scale=scale)
         return results
 
 
@@ -2130,12 +2141,21 @@ class LoadAnnotationsBEVDepth(object):
 @PIPELINES.register_module()
 class LoadOpenSceneAnnotationsBEVDepth(object):
 
-    def __init__(self, bda_aug_conf, classes, is_train=True):
+    def __init__(self, 
+                 bda_aug_conf=None, 
+                 classes=None, 
+                 is_train=True,
+                 use_tta=False):
         self.bda_aug_conf = bda_aug_conf
         self.is_train = is_train
         self.classes = classes
 
-    def sample_bda_augmentation(self):
+        self.use_tta = use_tta
+
+        if use_tta:
+            assert not is_train, "TTA is only used in test mode."
+
+    def sample_bda_augmentation(self, results):
         """Generate bda augmentation values based on bda_config."""
         if self.is_train:
             rotate_bda = np.random.uniform(*self.bda_aug_conf['rot_lim'])
@@ -2145,8 +2165,13 @@ class LoadOpenSceneAnnotationsBEVDepth(object):
         else:
             rotate_bda = 0
             scale_bda = 1.0
-            flip_dx = False
-            flip_dy = False
+
+            if not self.use_tta:
+                flip_dx = False
+                flip_dy = False
+            else:
+                flip_dx = results['pcd_vertical_flip']
+                flip_dy = results['pcd_horizontal_flip']
         return rotate_bda, scale_bda, flip_dx, flip_dy
 
     def bev_transform(self, rotate_angle, scale_ratio, flip_dx, flip_dy):
@@ -2168,12 +2193,9 @@ class LoadOpenSceneAnnotationsBEVDepth(object):
         return rot_mat
 
     def __call__(self, results):
-        rotate_bda, scale_bda, flip_dx, flip_dy = self.sample_bda_augmentation()
-        bda_mat = torch.zeros(4, 4)
-        bda_mat[3, 3] = 1
+        rotate_bda, scale_bda, flip_dx, flip_dy = \
+            self.sample_bda_augmentation(results)
         bda_rot = self.bev_transform(rotate_bda, scale_bda, flip_dx, flip_dy)
-        bda_mat[:3, :3] = bda_rot
-        
         imgs, rots, trans, intrins = results['img_inputs'][:4]
         post_rots, post_trans = results['img_inputs'][4:]
         results['img_inputs'] = (imgs, rots, trans, intrins, post_rots,
