@@ -238,6 +238,7 @@ class BEVStereo4DOCC(BEVStereo4D):
 
         if num_augs == 1:
             img_inputs = [img_inputs] if img_inputs is None else img_inputs
+            points = [points] if points is None else points
             return self.simple_test(points[0], img_metas[0], 
                                     img_inputs[0], **kwargs)
         else:

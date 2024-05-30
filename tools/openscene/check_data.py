@@ -79,6 +79,32 @@ def check_data_complete(data_name, split):
         pickle.dump(kept_data_infos, f, protocol=pickle.HIGHEST_PROTOCOL)
 
 
+def check_data_length(data_part, split):
+    pkl_fp = f"data/openscene-v1.1/openscene_{data_part}_{split}.pkl"
+    print(pkl_fp)
+
+    meta = mmengine.load(pkl_fp)
+    print(type(meta), len(meta))
+
+    scene_infos_list = get_scene_list(meta, scene_flag='scene_token')
+    print(len(scene_infos_list))
+    for scene_info, data in scene_infos_list.items():
+        print(scene_info, len(data))
+
+    ## only keep the scene with more than 10 data
+    kept_data_infos = []
+    for scene_info, data in scene_infos_list.items():
+        if len(data) > 10:
+            kept_data_infos.extend(data)
+    
+    print(len(kept_data_infos))
+    save_pkl_fp = f"data/openscene-v1.1/openscene_{data_part}_{split}_valid.pkl"
+    with open(save_pkl_fp, "wb") as f:
+        pickle.dump(kept_data_infos, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+
 if __name__ == "__main__":
+    check_data_length('trainval', 'val')
+    exit()
     # check_data_complete('mini', 'train')
     check_data_complete('trainval', 'train')
