@@ -93,8 +93,8 @@ class BEVStereo4DOpenOcc(BEVStereo4DOCC):
         if balance_cls_weight:
             class_weights = torch.from_numpy(1 / np.log(openocc_class_frequencies[:18] + 0.001)).float()
             self.loss_occ = nn.CrossEntropyLoss(
-                    weight=class_weights, reduction="mean"
-                )
+                weight=class_weights, reduction="mean"
+            )
         
         self.pred_flow = pred_flow
         if pred_flow:
@@ -190,10 +190,11 @@ class BEVStereo4DOpenOcc(BEVStereo4DOCC):
         
         ## predict the flow
         if self.pred_flow:
-            flow_pred = self.flow_predicter(volume_feat)
+            flow_pred = self.flow_predicter(volume_feat)  # (bs, 200, 200, 16, 2)
+            flow_pred = flow_pred.cpu().numpy()
 
         result_dict = dict()
-        result_dict['occ_pred'] = occ_res
+        result_dict['occ_results'] = occ_res
         if self.pred_flow:
-            result_dict['flow_pred'] = flow_pred
+            result_dict['flow_results'] = flow_pred
         return [result_dict]

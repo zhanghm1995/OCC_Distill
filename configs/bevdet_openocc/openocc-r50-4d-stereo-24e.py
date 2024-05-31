@@ -42,6 +42,8 @@ multi_adj_frame_id_cfg = (1, 1+1, 1)
 
 model = dict(
     type='BEVStereo4DOpenOcc',
+    balance_cls_weight=True,
+    use_lovasz_loss=True,
     pred_flow=True,
     num_classes=17, # including free category
     use_mask=False,

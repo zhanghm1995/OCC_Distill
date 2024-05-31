@@ -63,25 +63,21 @@ class Metric_mIoU():
     def __init__(self,
                  save_dir='.',
                  num_classes=18,
+                 free_cls_idx=None,
                  use_lidar_mask=False,
                  use_image_mask=False,
+                 class_names=None,
                  ):
         self.class_names = ['others','barrier', 'bicycle', 'bus', 'car', 'construction_vehicle',
                             'motorcycle', 'pedestrian', 'traffic_cone', 'trailer', 'truck',
                             'driveable_surface', 'other_flat', 'sidewalk',
-                            'terrain', 'manmade', 'vegetation','free']
+                            'terrain', 'manmade', 'vegetation','free'] if class_names is None else class_names
         self.save_dir = save_dir
         self.use_lidar_mask = use_lidar_mask
         self.use_image_mask = use_image_mask
         self.num_classes = num_classes
+        self.free_cls_idx = free_cls_idx if free_cls_idx is not None else num_classes - 1
 
-        self.point_cloud_range = [-40.0, -40.0, -1.0, 40.0, 40.0, 5.4]
-        self.occupancy_size = [0.4, 0.4, 0.4]
-        self.voxel_size = 0.4
-        self.occ_xdim = int((self.point_cloud_range[3] - self.point_cloud_range[0]) / self.occupancy_size[0])
-        self.occ_ydim = int((self.point_cloud_range[4] - self.point_cloud_range[1]) / self.occupancy_size[1])
-        self.occ_zdim = int((self.point_cloud_range[5] - self.point_cloud_range[2]) / self.occupancy_size[2])
-        self.voxel_num = self.occ_xdim * self.occ_ydim * self.occ_zdim
         self.hist = np.zeros((self.num_classes, self.num_classes))
         self.hist_occ = np.zeros((2, 2))
         self.cnt = 0
@@ -129,7 +125,11 @@ class Metric_mIoU():
         return round(np.nanmean(mIoUs) * 100, 2), hist
 
 
-    def add_batch(self,semantics_pred,semantics_gt,mask_lidar,mask_camera):
+    def add_batch(self, 
+                  semantics_pred,
+                  semantics_gt,
+                  mask_lidar=None,
+                  mask_camera=None):
         self.cnt += 1
         if self.use_image_mask:
             masked_semantics_gt = semantics_gt[mask_camera]
@@ -146,11 +146,17 @@ class Metric_mIoU():
         self.hist += _hist
 
         ## add below for binary occupancy evaluation
-        masked_semantics_gt[masked_semantics_gt != 17] = 1
-        masked_semantics_gt[masked_semantics_gt == 17] = 0
-        masked_semantics_pred[masked_semantics_pred != 17] = 1
-        masked_semantics_pred[masked_semantics_pred == 17] = 0
-        _, _hist_occ = self.compute_mIoU(masked_semantics_pred, masked_semantics_gt, 2)
+        binary_semantics_gt = np.ones_like(masked_semantics_gt)
+        binary_semantics_gt[masked_semantics_gt == self.free_cls_idx] = 0
+        
+        binary_semantics_pred = np.ones_like(masked_semantics_pred)
+        binary_semantics_pred[masked_semantics_pred == self.free_cls_idx] = 0
+        
+        # masked_semantics_gt[masked_semantics_gt != self.free_cls_idx] = 1
+        # masked_semantics_gt[masked_semantics_gt == self.free_cls_idx] = 0
+        # masked_semantics_pred[masked_semantics_pred != 17] = 1
+        # masked_semantics_pred[masked_semantics_pred == 17] = 0
+        _, _hist_occ = self.compute_mIoU(binary_semantics_pred, binary_semantics_gt, 2)
         self.hist_occ += _hist_occ
 
     def count_miou(self):
