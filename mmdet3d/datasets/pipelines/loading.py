@@ -40,6 +40,34 @@ class LoadOccGTFromFile(object):
         return results
 
 
+@PIPELINES.register_module()
+class LoadOpenOccOccupancy(object):
+    """Load occupancy from the OpenOcc dataset.
+
+    Args:
+        kwargs (dict): Arguments are the same as those in
+            :class:`LoadImageFromFile`.
+    """
+    def __call__(self, results):
+        """Call functions to load image and get image meta information.
+
+        Args:
+            results (dict): Result dict from :obj:`mmdet.CustomDataset`.
+
+        Returns:
+            dict: The dict contains loaded image and meta information.
+        """
+        occupancy_file_path = results['curr']['occ_path']
+        data = np.load(occupancy_file_path)
+        occupancy =data['semantics'] # (200, 200, 16), 0-16
+        flow = data['flow']  # (200, 200, 16, 2)
+
+        results['voxel_semantics'] = occupancy
+        results['voxel_flow'] = flow
+        
+        return results
+    
+
 def occ_to_voxel(gt_occ, ratio=1, gt_shape=(200, 200, 16)):
     """Convert the gt occ in (N, 4) format to (x, y, z)
 
@@ -2124,17 +2152,32 @@ class LoadAnnotationsBEVDepth(object):
         results['flip_dx'] = flip_dx
         results['flip_dy'] = flip_dy
         
-        if 'voxel_semantics' in results:
-            if flip_dx:
-                results['voxel_semantics'] = results['voxel_semantics'][::-1,...].copy()
-                results['mask_lidar'] = results['mask_lidar'][::-1,...].copy()
-                results['mask_camera'] = results['mask_camera'][::-1,...].copy()
-                results['mask_camera_free'] = results['mask_camera_free'][::-1,...].copy()
-            if flip_dy:
-                results['voxel_semantics'] = results['voxel_semantics'][:,::-1,...].copy()
-                results['mask_lidar'] = results['mask_lidar'][:,::-1,...].copy()
-                results['mask_camera'] = results['mask_camera'][:,::-1,...].copy()
-                results['mask_camera_free'] = results['mask_camera_free'][:,::-1,...].copy()
+        ## We need to flip the voxel labels and masks
+        possible_keys = [
+            'voxel_semantics', 'voxel_flow',
+            'mask_lidar', 'mask_camera', 'mask_camera_free'
+        ]
+        if flip_dx:
+            for key in possible_keys:
+                if key in results:
+                    results[key] = results[key][::-1,...].copy()
+        
+        if flip_dy:
+            for key in possible_keys:
+                if key in results:
+                    results[key] = results[key][:,::-1,...].copy()
+        
+        # if 'voxel_semantics' in results:
+        #     if flip_dx:
+        #         results['voxel_semantics'] = results['voxel_semantics'][::-1,...].copy()
+        #         results['mask_lidar'] = results['mask_lidar'][::-1,...].copy()
+        #         results['mask_camera'] = results['mask_camera'][::-1,...].copy()
+        #         results['mask_camera_free'] = results['mask_camera_free'][::-1,...].copy()
+        #     if flip_dy:
+        #         results['voxel_semantics'] = results['voxel_semantics'][:,::-1,...].copy()
+        #         results['mask_lidar'] = results['mask_lidar'][:,::-1,...].copy()
+        #         results['mask_camera'] = results['mask_camera'][:,::-1,...].copy()
+        #         results['mask_camera_free'] = results['mask_camera_free'][:,::-1,...].copy()
         return results
     
 

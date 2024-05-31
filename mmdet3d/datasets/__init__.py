@@ -34,6 +34,7 @@ from .sunrgbd_dataset import SUNRGBDDataset
 from .utils import get_loading_pipeline
 from .waymo_dataset import WaymoDataset
 from .nuplan_dataset import CustomNuPlanDataset
+from .openocc_dataset import NuScenesOpenOccDataset
 
 __all__ = [
     'KittiDataset', 'KittiMonoDataset', 'build_dataloader', 'DATASETS',
@@ -52,5 +53,5 @@ __all__ = [
     'RangeLimitedRandomCrop', 'RandomRotate', 'MultiViewWrapper',
     'NuScenesDatasetOccpancy', 'NuScenesDatasetOccpancySegmentation',
     'NuScenesDatasetBinaryOccpancy', 'NuScenesDatasetOccPretrain',
-    'RoboDriveDataset', 'CustomNuPlanDataset'
+    'RoboDriveDataset', 'CustomNuPlanDataset', 'NuScenesOpenOccDataset'
 ]
