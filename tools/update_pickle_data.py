@@ -25,7 +25,8 @@ def load_pickle():
     Args:
         pickle_file_path (_type_): _description_
     """
-    pickle_file_path = "data/nuscenes/bevdetv3-lidarseg-nuscenes_infos_train.pkl"
+    # pickle_file_path = "data/nuscenes/bevdetv3-lidarseg-nuscenes_infos_train.pkl"
+    pickle_file_path = "data/nuscenes/bevdetv2-nuscenes_infos_train_openocc.pkl"
 
     with open(pickle_file_path, "rb") as fp:
         dataset = pickle.load(fp)
@@ -168,8 +169,10 @@ def create_instance_pickle_with_corners():
 
 
 if __name__ == '__main__':
+    load_pickle()
+    exit()
     create_part_pickle("data/nuscenes/bevdetv3-lidarseg-nuscenes_infos_train.pkl")
     exit()
-    load_pickle()
+    
     exit()
     create_instance_pickle_with_corners()

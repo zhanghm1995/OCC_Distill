@@ -77,9 +77,6 @@ class NuScenesOpenOccDataset(NuScenesDataset):
         
         ray_based_miou(occ_preds, occ_gts, flow_preds, flow_gts, lidar_origins)
     
-    def __len__(self):
-        return 100
-    
     def evaluate(self, occ_results, runner=None, show_dir=None, **eval_kwargs):
         from .occ_metrics import Metric_mIoU
 

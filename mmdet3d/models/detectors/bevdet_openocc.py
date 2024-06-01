@@ -91,7 +91,7 @@ class BEVStereo4DOpenOcc(BEVStereo4DOCC):
         self.loss_occ_weight = loss_occ_weight  if balance_cls_weight else 1.0
 
         if balance_cls_weight:
-            class_weights = torch.from_numpy(1 / np.log(openocc_class_frequencies[:18] + 0.001)).float()
+            class_weights = torch.from_numpy(1 / np.log(openocc_class_frequencies[:17] + 0.001)).float()
             self.loss_occ = nn.CrossEntropyLoss(
                 weight=class_weights, reduction="mean"
             )
@@ -198,3 +198,131 @@ class BEVStereo4DOpenOcc(BEVStereo4DOCC):
         if self.pred_flow:
             result_dict['flow_results'] = flow_pred
         return [result_dict]
+    
+
+@DETECTORS.register_module()
+class BEVFusionStereo4DOpenOcc(BEVFusionStereo4DOCC):
+    """Fuse the lidar and camera images for occupancy prediction.
+
+    Args:
+        BEVFusionStereo4DOCCOpenScene (_type_): _description_
+    """
+
+    def __init__(self,
+                 pred_binary_occ=False,
+                 use_lovasz_loss=False,
+                 balance_cls_weight=False,
+                 loss_occ_weight=1.0,
+                 pred_flow=False,
+                 **kwargs):
+        super(BEVFusionStereo4DOpenOcc, self).__init__(**kwargs)
+
+        self.pred_binary_occ = pred_binary_occ
+
+        assert not self.use_mask, 'visibility mask is not supported for OpenScene dataset'
+
+        self.use_lovasz_loss = use_lovasz_loss 
+        if use_lovasz_loss:
+            self.loss_lovasz = Lovasz_loss(255)
+
+        # we use this weight when we set balance_cls_weight to true
+        self.loss_occ_weight = loss_occ_weight  if balance_cls_weight else 1.0
+
+        if balance_cls_weight:
+            class_weights = torch.from_numpy(1 / np.log(openocc_class_frequencies[:17] + 0.001)).float()
+            self.loss_occ = nn.CrossEntropyLoss(
+                    weight=class_weights, reduction="mean"
+                )
+            
+        self.pred_flow = pred_flow
+        if pred_flow:
+            self.flow_predicter = nn.Sequential(
+                nn.Linear(self.out_dim, self.out_dim*2),
+                nn.Softplus(),
+                nn.Linear(self.out_dim*2, 2),
+            )
+            self.flow_loss = builder.build_loss(dict(type='L1Loss', loss_weight=0.25))
+        
+    def loss_single(self, voxel_semantics, preds):
+        loss_ = dict()
+        voxel_semantics = voxel_semantics.long()
+        voxel_semantics = voxel_semantics.reshape(-1)
+        preds = preds.reshape(-1, self.num_classes)
+
+        if not self.pred_binary_occ:
+            loss_occ = self.loss_occ(preds, voxel_semantics)
+        else:
+            # predict binary occupancy, 1 is occupied, 0 is free
+            density_target = (voxel_semantics != 11).long()
+            loss_occ = self.loss_occ(preds, density_target)
+
+        if self.use_lovasz_loss:
+            loss_lovasz = self.loss_lovasz(F.softmax(preds, dim=1), 
+                                           voxel_semantics)
+            
+            loss_['loss_lovasz'] = loss_lovasz
+        
+        loss_['loss_occ'] = self.loss_occ_weight * loss_occ
+        return loss_
+
+    def simple_test(self,
+                    points,
+                    img_metas,
+                    img=None,
+                    rescale=False,
+                    **kwargs):
+        """Test function without augmentaiton."""
+        img_feats, _, _ = self.extract_feat(
+            points, img=img, img_metas=img_metas, **kwargs)
+        volume_feat = self.final_conv(img_feats[0]).permute(0, 4, 3, 2, 1)
+
+        ## predict the occupancy
+        occ_pred = self.predicter(volume_feat)
+
+        assert not self.pred_binary_occ
+
+        occ_score = occ_pred.softmax(-1)
+        occ_res = occ_score.argmax(-1)
+        occ_res = occ_res.squeeze(dim=0).cpu().numpy().astype(np.uint8)
+
+        ## predict the flow
+        if self.pred_flow:
+            flow_pred = self.flow_predicter(volume_feat)  # (bs, 200, 200, 16, 2)
+            flow_pred = flow_pred.cpu().numpy()
+
+        result_dict = dict()
+        result_dict['occ_results'] = occ_res
+        if self.pred_flow:
+            result_dict['flow_results'] = flow_pred
+        return [result_dict]
+    
+    def forward_train(self,
+                      points=None,
+                      img_metas=None,
+                      img_inputs=None,
+                      **kwargs):
+        """Forward training function.
+        """
+        img_feats, pts_feats, depth = self.extract_feat(
+            points, img=img_inputs, img_metas=img_metas, **kwargs)
+        gt_depth = kwargs['gt_depth']
+        losses = dict()
+        loss_depth = self.img_view_transformer.get_depth_loss(gt_depth, depth)
+        losses['loss_depth'] = loss_depth
+
+        volume_feat = self.final_conv(img_feats[0]).permute(0, 4, 3, 2, 1) # bncdhw->bnwhdc
+
+        ## predict the occupancy
+        occ_pred = self.predicter(volume_feat)
+        voxel_semantics = kwargs['voxel_semantics']
+        loss_occ = self.loss_single(voxel_semantics, occ_pred)
+        losses.update(loss_occ)
+
+        ## predict the flow
+        if self.pred_flow:
+            flow_pred = self.flow_predicter(volume_feat)
+            flow_gt = kwargs['voxel_flow']
+            loss_flow = self.flow_loss(flow_pred, flow_gt)
+            losses['loss_flow'] = loss_flow
+        return losses
+    
